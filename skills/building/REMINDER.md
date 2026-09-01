@@ -19,7 +19,13 @@ text is not loaded, the statements below are the rule in effect.
   reliably internal later, and a history cannot be tagged honestly long after the fact.
 - A release note says what CHANGED rather than what the thing is: anything that breaks
   first, then what is new, then what is fixed. The reader already has the project and
-  came to learn whether this version affects them.
+  came to learn whether this version affects them. Its title is the version alone, since
+  the project name is already on the page and a title carrying it goes wrong at a rename.
+- Publishing ANY release out of order, whether backfilling history or patching an older
+  line, can silently demote the current one, because release hosts commonly treat the most
+  recently created release as the latest rather than the highest version. Such a release
+  is created with the host's latest flag off where one exists, and what a visitor actually
+  sees is then checked.
 - The step that gets skipped is the one after the part that felt like the work, so the
   check for it belongs in whatever validates a release rather than in anyone's memory: a
   declared version with no matching tag, or no changelog entry, stops the release.

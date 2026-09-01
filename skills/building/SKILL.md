@@ -79,6 +79,22 @@ project's description has told them nothing.
 **A changelog entry and the release note are the same text.** Write it once. Two versions
 of the same account drift, and then neither is trustworthy.
 
+**Title a release with its version and nothing else.** The project's name is already on
+every page the release appears on, so repeating it buys nothing and costs something: a
+title carrying the product name becomes wrong the day the project is renamed, and a
+release list then reads as two different products sharing a repository. Put the naming
+history in the note, where it is history rather than a label.
+
+**Publishing a release out of order can silently demote the current one.** Release hosts
+commonly mark the most recently CREATED release as the latest, not the highest version. So
+backfilling history, or patching an old line after a newer one exists, points everyone
+arriving at the project at the wrong version, quietly, with nothing failing.
+
+Where the host has a per-release latest flag, create the out-of-order release with that
+flag OFF, rather than repairing the demotion afterwards: repairing it leaves a window
+where the project advertises the wrong version. Then look at what a visitor actually sees,
+because that is the only check that catches this.
+
 ## Make skipping it impossible
 
 This is the step that gets forgotten, because it happens after the part that felt like

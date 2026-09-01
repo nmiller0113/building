@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.1.0
+
+Two release rules the skill was missing, both learned by falling into them while
+publishing 2.0.0:
+
+- A release title is the version alone. Repeating the project name buys nothing, since it
+  is already on every page, and goes wrong the day the project is renamed.
+- Publishing a release out of order can silently demote the current one, because release
+  hosts commonly mark the most recently created release as latest rather than the highest
+  version. Backfilling history quietly pointed the repository at its oldest version. Such
+  a release is now created with the host's latest flag off rather than repairing the
+  demotion afterwards, which leaves a window advertising the wrong version.
+
+`scripts/check.sh` gained a `--release` mode. At build time a version may legitimately
+have no tag yet, so that is a warning; at release time it is a failure, which is what the
+skill has been telling everyone else to do while this repo only warned. The release mode
+also asks the host which release it advertises as latest and fails when that is not the
+highest tag, so the rule above is enforced rather than remembered.
+
 ## 2.0.0
 
 **Breaking: the plugin is renamed from `crosscheck` to `building`.** Existing installs

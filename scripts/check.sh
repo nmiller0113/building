@@ -16,6 +16,14 @@
 # genuinely leaking file prints "ok". Nothing here needs pipefail.
 set -u
 
+# --release promotes release-gate warnings to failures. At build time a version may
+# legitimately have no tag yet (you tag the commit that declares it), so those are
+# warnings; at release time they are the whole point. Without this split the skill
+# told everyone else to refuse a release it only ever warned about.
+RELEASE=0
+[ "${1:-}" = "--release" ] && RELEASE=1
+gate() { if [ "$RELEASE" -eq 1 ]; then fail "$1"; else warn "$1"; fi; }
+
 cd "$(dirname "$0")/.." || { printf 'FAIL  cannot cd to package root\n' >&2; exit 1; }
 SKILLS="skills/building skills/crosscheck"
 SKILLS_MD="skills/building/SKILL.md skills/crosscheck/SKILL.md"
@@ -297,8 +305,24 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
         if git rev-parse "v$v" >/dev/null 2>&1; then
             ok "v$v is tagged"
         else
-            warn "version $v has no tag v$v yet; tag it as part of the release"
+            gate "version $v has no tag v$v yet; tag it as part of the release"
         fi
+    fi
+fi
+
+# --- the visitor-facing latest marker ------------------------------------------
+# Creating a release out of order silently makes it "latest" on most hosts. That failure
+# is invisible from inside the repo, so the only check that catches it asks the host what
+# a visitor actually sees.
+if [ "$RELEASE" -eq 1 ] && command -v gh >/dev/null 2>&1 \
+        && git remote get-url origin 2>/dev/null | grep -q github; then
+    slug=$(git remote get-url origin | sed -E 's#.*github\.com[:/]([^/]+/[^/.]+)(\.git)?#\1#')
+    live=$(gh api "repos/$slug/releases/latest" --jq .tag_name 2>/dev/null)
+    top=$(git tag -l 'v*' | sort -V | tail -1)
+    if [ -n "$live" ] && [ -n "$top" ] && [ "$live" != "$top" ]; then
+        fail "the host advertises $live as latest but the highest tag is $top"
+    elif [ -n "$live" ]; then
+        ok "latest release $live matches the highest tag"
     fi
 fi
 
