@@ -1,17 +1,17 @@
 {
-  "name": "crosscheck",
-  "description": "Build against the real contract, then send every change for bounded adversarial review: three strikes, roles swap, hard stop at six.",
-  "version": "1.0.0",
+  "name": "building",
+  "description": "How to build something and actually finish it: the order of work, an independent bounded review, and a version that is tagged, released and findable.",
+  "version": "2.0.0",
   "author": {
     "name": "Nathan Miller"
   },
-  "repository": "https://github.com/nmiller0113/crosscheck",
+  "repository": "https://github.com/nmiller0113/building",
   "license": "MIT",
   "keywords": [
+    "build",
+    "release",
+    "versioning",
     "review",
-    "verification",
-    "adversarial",
-    "workflow",
-    "build"
+    "workflow"
   ]
 }

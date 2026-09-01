@@ -1,6 +1,6 @@
-This summary ships with the crosscheck skill. Where the plugin is installed its full text
-loads through the Skill tool as `crosscheck:crosscheck`, and where that text is not
-loaded, the statements below are the rule in effect.
+This summary ships with the crosscheck skill. Where the plugin is installed, the full
+text loads through the Skill tool under this plugin's crosscheck skill, and where that
+text is not loaded, the statements below are the rule in effect.
 
 - Anything executable or rule-bearing that gets created or changed goes for an
   independent adversarial review before it is called done. That covers scripts, hooks,

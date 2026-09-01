@@ -42,6 +42,70 @@ import json, os, re, sys, tempfile, time
 
 DEFAULT_MAX_AGE_H = 12
 
+# ⭐ THE ALLOWLIST. A list of commands known to WRITE can only ever be incomplete: this
+# gate shipped four rounds of "one more missing writer" (rm, then piped xargs rm, then
+# for-loops hiding the head, then a here-string swallowing the rest of the line). Each
+# miss was silent, which is the failure that matters. So the question is inverted: a
+# segment passes when its resolved head is a command known to only READ. Anything else
+# needs a work order.
+#
+# The failure direction flips with it. An unlisted read-only tool now BLOCKS, which costs
+# one work order and is visible; an unlisted writer no longer passes silently.
+#
+# This bounds the SHELL level only. An interpreter's inline body is still a best-effort
+# scan (see BODY_WRITE), because the interpreters are on this list: they are the primary
+# way anything gets read here, and gating every one of them would make the gate
+# unusable. That limit is stated in the docstring and the README rather than hidden.
+READ_ONLY = {
+    # reading files and directories
+    "cat", "head", "tail", "less", "more", "nl", "od", "xxd", "strings", "file",
+    "ls", "dir", "find", "tree", "stat", "readlink", "realpath", "basename", "dirname",
+    "du", "df", "wc", "cksum", "md5sum", "sha1sum", "sha256sum", "b2sum",
+    # searching and transforming a STREAM (none of these write without a redirect,
+    # and a redirect is caught separately)
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "diff", "comm", "cmp", "join",
+    "cut", "paste", "tr", "rev", "fold", "expand", "unexpand", "column", "uniq",
+    "jq", "yq", "xmllint", "base64", "iconv", "date", "seq", "printf", "echo",
+    # sed and awk are read-only WITHOUT -i, which is checked separately below
+    "sed", "awk", "gawk", "mawk",
+    # navigation and shell builtins that change no file
+    "cd", "pwd", "true", "false", "test", "[", "[[", "type", "which", "command",
+    "hash", "alias", "set", "unset", "export", "local", "read", "eval", "exit",
+    "return", "shift", "getopts", "let", "declare", "typeset", "readonly", "source",
+    "sleep", "wait", "jobs", "kill", "trap", "umask", "ulimit", "id", "whoami",
+    "break", "continue", ":", "exec", "disown", "pushd", "popd", "dirs", "times",
+    "]]", "]",
+    "caller", "builtin", "enable", "logout", "suspend", "fc", "history",
+    "groups", "hostname", "uname", "arch", "tty", "env", "printenv", "locale",
+    # process and system inspection
+    "ps", "top", "htop", "pgrep", "pidof", "lsof", "uptime", "free", "vmstat",
+    "iostat", "netstat", "ss", "ip", "ifconfig", "dmesg", "journalctl", "systemctl",
+    "service", "lscpu", "lsblk", "lsusb", "lspci", "mount", "getent",
+    # version control, reading only. The write verbs are handled by the git branch.
+    "git", "gh", "hg", "svn",
+    # language and tool inspection that does not write by itself
+    # ⚠️ THE LINE FOR THIS LIST: a command belongs here only if its ORDINARY USE creates
+    # or modifies nothing. A build tool, a package manager and a deploy tool all fail
+    # that test, and putting them here was the first mistake made writing this list:
+    # `terraform apply`, `kubectl apply`, `pip install` and `cargo build` were all
+    # allowed by a gate whose entire purpose is stopping unasked-for changes. They are
+    # deliberately absent, and gating them costs one work order each.
+    #
+    # The interpreters ARE here, because they are the primary way anything gets read and
+    # gating every one would make this unusable. Their inline bodies get the best-effort
+    # scan instead, and that limit is stated rather than hidden.
+    "python", "python2", "python3", "node", "nodejs", "perl", "ruby", "deno", "bun",
+    "php", "osascript",
+    # test runners: running what already exists is the floor of verification, and
+    # blocking it would obstruct the one thing the method requires before claiming done
+    "pytest", "tox", "jest", "mocha", "vitest", "rspec", "phpunit", "unittest",
+    # network and remote inspection that writes nothing locally
+    "http", "ping", "dig", "nslookup", "host", "traceroute", "nc", "ssh",
+    # shells and wrappers: their contents are resolved recursively, never trusted
+    "sh", "bash", "zsh", "ksh", "dash", "sudo", "doas", "nohup", "setsid", "stdbuf",
+    "time", "timeout", "nice", "ionice", "watch", "xargs", "parallel",
+    "man", "help", "info", "whatis", "apropos",
+}
 # Commands that place bytes in a file or remove one, and where their destination sits.
 #   all    - every non-flag operand
 #   last   - the final operand, when there are at least two
@@ -65,6 +129,7 @@ WRITE_CMDS = {
     # Extractors write names chosen by their payload, not by the command line.
     "tar": "cwd", "unzip": "cwd", "gunzip": "cwd", "bunzip2": "cwd",
 }
+
 # Wrappers that delay the real command, mapped to how many operands they consume first.
 WRAPPERS = {"sudo": 0, "command": 0, "env": 0, "nohup": 0, "setsid": 0, "stdbuf": 0,
             "time": 0, "timeout": 1, "nice": 0, "ionice": 0, "watch": 0}
@@ -226,6 +291,29 @@ def tokenize(cmd):
             i += 2
             continue
 
+        # An UNQUOTED command substitution runs too. Capture its body the same way the
+        # quoted branch does rather than letting its characters become part of a word.
+        if c == "`":
+            j = cmd.find("`", i + 1)
+            if j == -1:
+                i = n
+                break
+            substs.append(cmd[i + 1:j])
+            i = j + 1
+            continue
+        if cmd[i:i + 2] == "$(" and cmd[i:i + 3] != "$((":
+            depth, j = 0, i + 1
+            while j < n:
+                if cmd[j] == "(":
+                    depth += 1
+                elif cmd[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            substs.append(cmd[i + 2:j])
+            i = j + 1
+            continue
         if cmd[i:i + 3] == "$((" or (cmd[i:i + 2] == "((" and not has_word):
             depth, j = 0, i
             while j < n:
@@ -322,6 +410,15 @@ def tokenize(cmd):
                     op, i = cand, i + len(cand)
                     break
             flush()
+            # `>&N`, `>&-`, `2>&1`: an fd DUPLICATION, not a file. Consume the target so
+            # it never becomes a phantom command head, and emit no redirect at all.
+            if i < n and cmd[i] == "&":
+                j = i + 1
+                while j < n and (cmd[j].isdigit() or cmd[j] == "-"):
+                    j += 1
+                if j > i + 1:
+                    i = j
+                    continue
             seg.append(Tok(fd + op, op=op))
             continue
 
@@ -336,6 +433,12 @@ def tokenize(cmd):
 
     endseg()
     return segments, heredocs, substs
+
+
+def _is_lookup(words):
+    """`command -v X` and `command -V X` resolve a name and run nothing."""
+    return (words and os.path.basename(words[0]) == "command"
+            and any(w in ("-v", "-V") for w in words[1:]))
 
 
 def words_of(seg):
@@ -354,6 +457,8 @@ def words_of(seg):
             skip = False
             continue
         out.append(t.text)
+    if _is_lookup(out):
+        return []
 
     # Compound keywords hide the real head: splitting on ';' makes the write segment
     # of `for f in a b; do cp $f /etc/backup/; done` start with `do`, and
@@ -364,6 +469,10 @@ def words_of(seg):
     # harmless definition.
     # `cp () { ... }` tokenizes as ['cp', '()'], so endswith("()") never fired and the
     # POSIX spaced spelling of a harmless definition was blocked as a call.
+    # A test compound runs no command. Popping "[[" as a reserved word left its first
+    # operand standing as the head, so the most ordinary conditional in bash blocked.
+    if out and out[0] in ("[[", "["):
+        return []
     if out and (out[0] == "function" or out[0].endswith("()")
                 or (len(out) > 1 and (out[1] in ("()", "(", ")")
                                       or out[1].startswith("()")))):
@@ -583,12 +692,15 @@ def bash_targets(cmd, cwd, depth=0):
         # a write command left with NO operands takes them from stdin, so the
         # working directory stands in as the destination.
         via_xargs = False
-        if head == "xargs":
+        if head in ("xargs", "parallel"):
             words = _xargs_inner(words)
             if not words:
                 continue
             head = os.path.basename(words[0])
             via_xargs = True
+        if head == "eval" and len(words) > 1:
+            targets.extend(bash_targets(" ".join(words[1:]), cwd, depth + 1))
+            continue
         if head in SHELLS:
             # `sh -c '...'` hides an entire command. Recurse rather than let it through.
             # The flag may sit inside a cluster: `bash -lc 'echo x > f.txt'` carries
@@ -598,8 +710,12 @@ def bash_targets(cmd, cwd, depth=0):
                     targets.extend(bash_targets(words[i + 1], cwd, depth + 1))
             continue
         if head in WRITE_CMDS:
-            d = _dests(words, WRITE_CMDS[head])
-            if via_xargs and not d:
+            kind = WRITE_CMDS[head]
+            d = _dests(words, kind)
+            # Only where the operands ARE the destinations. For opt: and cwd kinds an
+            # empty result means this invocation reads, and forcing a target there made
+            # `xargs tar -tzf` contradict a direct `tar -tzf`.
+            if via_xargs and not d and kind in ("all", "last"):
                 d = ["."]
             targets.extend(d)
         elif head in ("sed", "perl", "ruby", "gawk", "awk") and \
@@ -657,6 +773,60 @@ def bash_targets(cmd, cwd, depth=0):
         t = os.path.expanduser(t)
         res.append(t if os.path.isabs(t) else os.path.join(cwd, t))
     return res
+
+
+def unrecognised_heads(cmd, depth=0):
+    """Command heads that are not known to be read-only.
+
+    This is the allowlist half of the gate and the reason it stops leaking. The
+    write-detection below still runs and still names the specific path a known writer
+    would touch, which makes for a better block message; this catches everything that
+    detection was never told about.
+
+    Wrappers and shells are resolved through rather than trusted: `sudo rm` reports rm,
+    and `sh -c "curl ... | tar x"` reports whatever is inside.
+    """
+    if depth > 3:
+        return []
+    out = []
+    segments, _, substs = tokenize(cmd)
+    for seg in segments:
+        words = words_of(seg)
+        if not words:
+            continue
+        head = os.path.basename(words[0])
+        if head in SHELLS:
+            # The flag may sit inside a cluster: `bash -lc '...'` is an everyday spelling.
+            # Matching only the exact token let anything the allowlist would stop run
+            # ungated behind it.
+            for i, w in enumerate(words):
+                if i and re.match(r"^-[A-Za-z]*c[A-Za-z]*$", w) and i + 1 < len(words):
+                    out.extend(unrecognised_heads(words[i + 1], depth + 1))
+            continue
+        if head in ("xargs", "parallel"):
+            inner = _xargs_inner(words)
+            if inner:
+                out.extend(unrecognised_heads(" ".join(inner), depth + 1))
+            continue
+        # A path invocation of something local, whether relative or absolute, is never
+        # on a list of names, and it is exactly the shape that should not pass
+        # unexamined.
+        # A head in WRITE_CMDS is RECOGNISED: the gate knows exactly what it writes and
+        # bash_targets already decides whether THIS invocation does. Reporting it here as
+        # well double-counted it and discarded the exemption logic, so `unzip -l` and a
+        # mv between two exempt paths both blocked.
+        if head in WRITE_CMDS or head in ("find", "git", "sed", "perl", "ruby",
+                                          "gawk", "awk"):
+            continue
+        if words[0].startswith("./") or words[0].startswith("/") or "/" in words[0]:
+            if head not in READ_ONLY:
+                out.append(words[0])
+            continue
+        if head not in READ_ONLY:
+            out.append(head)
+    for body in substs:
+        out.extend(unrecognised_heads(body, depth + 1))
+    return out
 
 
 def interpreter_writes(cmd, depth=0):
@@ -995,9 +1165,16 @@ def main():
         targets = [t for t in bash_targets(cmd, cwd)
                    if not _is_exempt(t, exempt, state, deleting)]
         interp = interpreter_writes(cmd)
-        if targets or interp:
-            why = ("would write: " + ", ".join(targets[:3])) if targets else \
-                  "an interpreter script body containing a write primitive"
+        unknown = unrecognised_heads(cmd)
+        if targets or interp or unknown:
+            if targets:
+                why = "would write: " + ", ".join(targets[:3])
+            elif unknown:
+                why = ("not a command known to only read: " + ", ".join(sorted(set(unknown))[:3])
+                       + "\n  This gate allowlists readers rather than listing writers, so a"
+                       + "\n  command it does not recognise needs a work order.")
+            else:
+                why = "an interpreter script body containing a write primitive"
             require_order("file change via Bash\n\n  " + why)
 
         if not is_commit(cmd):

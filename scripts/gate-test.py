@@ -89,7 +89,7 @@ LEGIT = [
     "git status --short",
     "git diff --stat",
     "git log --oneline -5",
-    "make 2>/dev/null",
+    "grep -rn foo src/ 2>/dev/null",
     "awk '$3 > 100 {print $1}' /etc/passwd",
     "grep -rn 'foo -> bar' src/",
     "grep -rn 'shutil.copy' src/ && python3 -m pytest -q",
@@ -97,9 +97,6 @@ LEGIT = [
     "python3 - <<'E'\nprint(open('a.py').read())\nE",
     "python3 - <<'E'\ndef f(x) -> int:\n    return x if x > 2 else 0\nprint(f(5))\nE",
     "python3 - <<'E'\nimport re\nprint(re.search(r'\\.write\\(', open('x').read()))\nE",
-    "pip install -r requirements.txt",
-    "npm install lodash.merge",
-    "apt-get install python3.12",
     "grep -c dd stats.csv",
     "echo 'remember to " + GIT + " later'",
     "grep -rn '" + GIT + "' docs/",
@@ -120,7 +117,7 @@ LEGIT = [
     "git log --grep commit",
     "python3 -c 'import sys; sys.stdout.write(\"hi\")'",
     "python3 -c 'todos = [1,2,3]; todos.remove(2)'",
-    "docker ps --format '{{.Names}} > {{.Status}}'",
+    "git log --format='%h > %s' -5",
     "curl -s https://example.com/api | jq '.n > 3'",
 
     # --- cycle 4: shapes the earlier gate missed or wrongly blocked ---
@@ -170,6 +167,39 @@ LEGIT = [
     "rm () { echo safe; }",
     "time git status",
     "git switch -c feature",
+    # --- allowlist: recognised readers still pass ---
+    "jq -r '.items[]' data.json",
+    "systemctl status cron.service",
+    "ssh host uptime",
+    "pytest -q tests/",
+    # --- allowlist cycle 2: fd duplication, substitution, lookups, builtins ---
+    "grep -rn foo . 2>&1",
+    "echo hi >&2",
+    "python3 -c 'print(1)' 2>&1 | head",
+    "sort data.txt 2>&1 | uniq",
+    "VAR=$(git rev-parse HEAD); echo $VAR",
+    "echo $(date)",
+    "command -v somethingweird",
+    "command -v python3 && echo yes",
+    "eval 'echo hi'",
+    ": ; break ; continue",
+    "pushd /tmp && popd",
+    "ls | xargs grep foo",
+    "echo a | parallel echo",
+    # --- the allowlist review's own reproducers, so its findings cannot come back ---
+    "git status 2>&1",
+    "ls > /dev/null 2>&1",
+    "SHA=$(git rev-parse HEAD)",
+    "COUNT=$(wc -l < file.txt)",
+    "N=$(grep -c error app.log)",
+    # --- review round 2: test compounds, clustered shell flags, read-only via xargs ---
+    "[[ -f config.yaml ]] && cat config.yaml",
+    "[[ -n $HOME ]] && echo home",
+    "bash -lc 'git status'",
+    "ls *.tgz | xargs tar -tzf",
+    "cat urls.txt | xargs -n1 curl -sI",
+    "ls | parallel gunzip -t",
+    "echo `date`",
 ]
 
 # ---- WRITES: accidental file changes. An allow here is a FALSE NEGATIVE. -------------
@@ -191,6 +221,10 @@ WRITES = [
     "python3 -c \"open('a.py','w')\"",
     "node -e \"require('fs').writeFileSync('a.js','x')\"",
     "python3 - <<'E'\nimport shutil\nshutil.copy('a','b')\nE",
+    # a package manager writes into the project; under an allowlist that needs
+    # authorisation rather than being a false positive as it was under a denylist
+    "pip install -r requirements.txt",
+    "npm install lodash.merge",
     "rm important.py",
     "rm -rf src/",
     "sort -o data.txt input.txt",
@@ -252,6 +286,27 @@ WRITES = [
     "git reset --hard",
     "git stash",
     "echo x > /dev/shm/scratch.txt",
+    # --- allowlist: a tool the gate does not recognise is stopped, not waved through.
+    # Every one of these passed under the denylist because nobody had listed it. ---
+    "black .",
+    "npx prettier --write .",
+    "terraform apply -auto-approve",
+    "kubectl apply -f manifest.yaml",
+    "helm upgrade release .",
+    "cargo build --release",
+    "./build.sh",
+    "some-unknown-tool --output out.txt",
+    # --- allowlist cycle 2: writers reached indirectly ---
+    "VAR=$(rm -rf build)",
+    "ls | parallel rm",
+    "find . -name '*.o' | parallel rm -f",
+    "eval 'rm -rf ./build'",
+    "echo $(sed -i s/a/b/ config.py)",
+    "parallel rm ::: a.txt b.txt",
+    "parallel sed -i s/a/b/ ::: f.txt",
+    "bash -lc 'npm install left-pad'",
+    "ls *.tgz | xargs tar -xzf",
+    "echo `rm -rf build`",
 ]
 
 fails = []

@@ -17,8 +17,11 @@
 set -u
 
 cd "$(dirname "$0")/.." || { printf 'FAIL  cannot cd to package root\n' >&2; exit 1; }
-SKILL="skills/crosscheck/SKILL.md"
-REMINDER="skills/crosscheck/REMINDER.md"
+SKILLS="skills/building skills/crosscheck"
+SKILLS_MD="skills/building/SKILL.md skills/crosscheck/SKILL.md"
+# Deep validation loops over EVERY skill. Hardcoding one meant naming a new
+# primary skill silently dropped the other's frontmatter and body checks.
+SKILL="skills/building/SKILL.md"
 # DERIVED, never listed. A hardcoded set ships every new file unscanned, and the first
 # version of this line excluded this validator itself, which is the file that then
 # carried the very tokens it certifies absent. Exemptions must be principled: the only
@@ -45,109 +48,114 @@ warn() { printf 'WARN  %s\n' "$1" >&2; warns=$((warns + 1)); }
 ok()   { printf 'ok    %s\n' "$1"; }
 done_() { printf '\n%d fail, %d warn\n' "$fails" "$warns"; [ "$fails" -eq 0 ]; }
 
-[ -f "$SKILL" ] || { fail "$SKILL not found"; done_; exit 1; }
+for SKILL in $SKILLS_MD; do
+    [ -f "$SKILL" ] || { fail "$SKILL not found"; done_; exit 1; }
 
-# CRLF breaks every anchored match below, so rule it out before matching anything.
-if grep -q $'\r' "$SKILL"; then
-    fail "$SKILL has CRLF line endings; convert to LF"
-    done_; exit 1
-fi
+    # CRLF breaks every anchored match below, so rule it out before matching anything.
+    if grep -q $'\r' "$SKILL"; then
+        fail "$SKILL has CRLF line endings; convert to LF"
+        done_; exit 1
+    fi
 
-# --- frontmatter boundaries ---------------------------------------------------
-# Tolerate trailing whitespace on the fences: YAML parsers do, and a strict match
-# silently picks up a later thematic break as the closer and shifts every check.
-head -n 1 "$SKILL" | grep -qE '^---[[:space:]]*$' || fail "line 1 must be '---'"
-fm_end=$(awk 'NR>1 && /^---[[:space:]]*$/{print NR; exit}' "$SKILL")
-[ -n "$fm_end" ] || { fail "frontmatter is never closed"; done_; exit 1; }
-[ "$fm_end" -ge 3 ] || { fail "frontmatter is empty"; done_; exit 1; }
-fm=$(sed -n "2,$((fm_end - 1))p" "$SKILL")
-ok "frontmatter closes at line $fm_end"
+    # --- frontmatter boundaries ---------------------------------------------------
+    # Tolerate trailing whitespace on the fences: YAML parsers do, and a strict match
+    # silently picks up a later thematic break as the closer and shifts every check.
+    head -n 1 "$SKILL" | grep -qE '^---[[:space:]]*$' || fail "line 1 must be '---'"
+    fm_end=$(awk 'NR>1 && /^---[[:space:]]*$/{print NR; exit}' "$SKILL")
+    [ -n "$fm_end" ] || { fail "frontmatter is never closed"; done_; exit 1; }
+    [ "$fm_end" -ge 3 ] || { fail "frontmatter is empty"; done_; exit 1; }
+    fm=$(sed -n "2,$((fm_end - 1))p" "$SKILL")
+    ok "frontmatter closes at line $fm_end"
 
-# --- keys must be ones we recognise -------------------------------------------
-allowed="name description license compatibility metadata allowed-tools when_to_use \
-disable-model-invocation model context hooks version author"
-while IFS= read -r key; do
-    case " $allowed " in
-        *" $key "*) ;;
-        *) fail "unrecognised frontmatter key: $key" ;;
-    esac
-done < <(printf '%s\n' "$fm" | grep -oE '^[A-Za-z0-9_-]+:' | tr -d ':')
+    # --- keys must be ones we recognise -------------------------------------------
+    allowed="name description license compatibility metadata allowed-tools when_to_use \
+    disable-model-invocation model context hooks version author"
+    while IFS= read -r key; do
+        case " $allowed " in
+            *" $key "*) ;;
+            *) fail "unrecognised frontmatter key: $key" ;;
+        esac
+    done < <(printf '%s\n' "$fm" | grep -oE '^[A-Za-z0-9_-]+:' | tr -d ':')
 
-unquote() {
-    local v=$1
-    case $v in
-        \"*\") v=${v#\"}; v=${v%\"} ;;
-        \'*\') v=${v#\'}; v=${v%\'} ;;
-    esac
-    printf '%s' "$v"
-}
+    unquote() {
+        local v=$1
+        case $v in
+            \"*\") v=${v#\"}; v=${v%\"} ;;
+            \'*\') v=${v#\'}; v=${v%\'} ;;
+        esac
+        printf '%s' "$v"
+    }
 
-# scalar_or_die enforces [house]: single-line plain scalars only. Sets SCALAR, returns
-# non-zero on failure. NOT called via $( ): command substitution runs in a subshell, so
-# a fail() inside one increments a copy of the counter and is never tallied.
-SCALAR=""
-scalar_or_die() {
-    local key=$1 raw
+    # scalar_or_die enforces [house]: single-line plain scalars only. Sets SCALAR, returns
+    # non-zero on failure. NOT called via $( ): command substitution runs in a subshell, so
+    # a fail() inside one increments a copy of the counter and is never tallied.
     SCALAR=""
-    raw=$(printf '%s\n' "$fm" | sed -n "s/^$key[[:space:]]*:[[:space:]]*//p" | head -n 1)
-    case $raw in
-        '>'*|'|'*) fail "$key: is a block scalar; keep it on one line"; return 1 ;;
-    esac
-    if [ -z "$raw" ]; then
-        fail "$key: has no value on its own line; keep it on one line"
-        return 1
+    scalar_or_die() {
+        local key=$1 raw
+        SCALAR=""
+        raw=$(printf '%s\n' "$fm" | sed -n "s/^$key[[:space:]]*:[[:space:]]*//p" | head -n 1)
+        case $raw in
+            '>'*|'|'*) fail "$key: is a block scalar; keep it on one line"; return 1 ;;
+        esac
+        if [ -z "$raw" ]; then
+            fail "$key: has no value on its own line; keep it on one line"
+            return 1
+        fi
+        raw=$(unquote "$raw")
+        case $raw in
+            *[![:space:]]*) ;;
+            *) fail "$key: is empty or whitespace only"; return 1 ;;
+        esac
+        SCALAR=$raw
+    }
+
+    # --- name ---------------------------------------------------------------------
+    if scalar_or_die name; then
+        name=$SCALAR
+        printf '%s' "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$' \
+            || fail "name '$name' must be lowercase letters, numbers and hyphens [spec]"
+        [ ${#name} -le 64 ] || fail "name is ${#name} chars, spec limit is 64"
+        # Compare against the SKILL's own directory, not the package's. Comparing to
+        # the package basename was right when a plugin held one skill and became
+        # wrong the moment it held two.
+        [ "$name" = "$(basename "$(dirname "$SKILL")")" ] \
+            || warn "skill name '$name' does not match its directory '$(basename "$(dirname "$SKILL")")'"
+        ok "name: $name"
     fi
-    raw=$(unquote "$raw")
-    case $raw in
-        *[![:space:]]*) ;;
-        *) fail "$key: is empty or whitespace only"; return 1 ;;
-    esac
-    SCALAR=$raw
-}
 
-# --- name ---------------------------------------------------------------------
-if scalar_or_die name; then
-    name=$SCALAR
-    printf '%s' "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$' \
-        || fail "name '$name' must be lowercase letters, numbers and hyphens [spec]"
-    [ ${#name} -le 64 ] || fail "name is ${#name} chars, spec limit is 64"
-    [ "$name" = "$(basename "$PWD")" ] \
-        || warn "name '$name' does not match directory '$(basename "$PWD")'"
-    ok "name: $name"
-fi
-
-# --- description: the field that decides whether the skill ever loads ----------
-if scalar_or_die description; then
-    desc=$SCALAR
-    n=${#desc}
-    if   [ "$n" -gt 1024 ]; then fail "description is $n chars, spec limit is 1024"
-    elif [ "$n" -gt 500 ];  then warn "description is $n chars, house target is 500"
-    else ok "description: $n chars"
+    # --- description: the field that decides whether the skill ever loads ----------
+    if scalar_or_die description; then
+        desc=$SCALAR
+        n=${#desc}
+        if   [ "$n" -gt 1024 ]; then fail "description is $n chars, spec limit is 1024"
+        elif [ "$n" -gt 500 ];  then warn "description is $n chars, house target is 500"
+        else ok "description: $n chars"
+        fi
     fi
-fi
 
-# --- body length [house] ------------------------------------------------------
-lines=$(awk 'END{print NR}' "$SKILL")
-body=$((lines - fm_end))
-if   [ "$body" -gt 500 ]; then fail "body is $body lines, best-practice ceiling is 500"
-elif [ "$body" -gt 250 ]; then warn "body is $body lines, house target is 250"
-else ok "body: $body lines"
-fi
+    # --- body length [house] ------------------------------------------------------
+    lines=$(awk 'END{print NR}' "$SKILL")
+    body=$((lines - fm_end))
+    if   [ "$body" -gt 500 ]; then fail "body is $body lines, best-practice ceiling is 500"
+    elif [ "$body" -gt 250 ]; then warn "body is $body lines, house target is 250"
+    else ok "body: $body lines"
+    fi
 
-# --- no code in SKILL.md [house] ----------------------------------------------
-# Any fence at all, not a language allowlist: the allowlist version passed a bare fence
-# containing a whole program. Examples here use blockquotes.
-if grep -qE '^[[:space:]]*(```|~~~)' "$SKILL"; then
-    fail "SKILL.md contains a code fence; instructions belong here, code in hooks/"
-else
-    ok "no code fences in SKILL.md"
-fi
+    # --- no code in SKILL.md [house] ----------------------------------------------
+    # Any fence at all, not a language allowlist: the allowlist version passed a bare fence
+    # containing a whole program. Examples here use blockquotes.
+    if grep -qE '^[[:space:]]*(```|~~~)' "$SKILL"; then
+        fail "SKILL.md contains a code fence; instructions belong here, code in hooks/"
+    else
+        ok "no code fences in SKILL.md"
+    fi
 
-# --- referenced companion files exist -----------------------------------------
-while IFS= read -r ref; do
-    while [ "${ref%[.,;:)]}" != "$ref" ]; do ref=${ref%[.,;:)]}; done
-    [ -e "$ref" ] || fail "SKILL.md references '$ref', which does not exist"
-done < <(grep -oE '(\./)?(scripts|references|assets|hooks)/[A-Za-z0-9._/-]+' "$SKILL" | sort -u)
+    # --- referenced companion files exist -----------------------------------------
+    while IFS= read -r ref; do
+        while [ "${ref%[.,;:)]}" != "$ref" ]; do ref=${ref%[.,;:)]}; done
+        [ -e "$ref" ] || fail "SKILL.md references '$ref', which does not exist"
+    done < <(grep -oE '(\./)?(scripts|references|assets|hooks)/[A-Za-z0-9._/-]+' "$SKILL" | sort -u)
+done
 
 # --- publishable: every shipped file ------------------------------------------
 # Modest by design. This catches the leaks that actually happen (a pasted path, a host,
@@ -208,21 +216,24 @@ elif command -v python3 >/dev/null 2>&1 \
         && ! python3 -c 'import json,sys;json.load(open(sys.argv[1]))' hooks/hooks.json 2>/dev/null; then
     fail "hooks/hooks.json is not valid JSON; the hooks will not register"
 else
-    for ref in hooks/session-start.sh hooks/workorder-gate.py; do
+    for ref in hooks/session-start.py hooks/workorder-gate.py; do
         grep -q "$ref" hooks/hooks.json || fail "hooks/hooks.json does not reference $ref"
     done
 fi
-[ -s hooks/session-start.sh ] || fail "hooks/session-start.sh missing or empty"
-[ -x hooks/session-start.sh ] || fail "hooks/session-start.sh is not executable"
+[ -s hooks/session-start.py ] || fail "hooks/session-start.py missing or empty"
+[ -x hooks/session-start.py ] || fail "hooks/session-start.py is not executable"
 [ -s hooks/workorder-gate.py ] || fail "hooks/workorder-gate.py missing or empty"
-command -v bash >/dev/null 2>&1 && { bash -n hooks/session-start.sh 2>/dev/null \
-    || fail "hooks/session-start.sh is not valid bash"; }
+command -v python3 >/dev/null 2>&1 && { python3 -m py_compile hooks/session-start.py 2>/dev/null \
+    || fail "hooks/session-start.py does not compile"; }
 command -v python3 >/dev/null 2>&1 && { python3 -m py_compile hooks/workorder-gate.py 2>/dev/null \
     || fail "hooks/workorder-gate.py does not compile"; }
 rm -rf hooks/__pycache__ 2>/dev/null
 # The SessionStart hook prints this file and nothing else. Absent, it injects silently
 # nothing and the plugin's headline behaviour is gone with no error anywhere.
-[ -s "$REMINDER" ] || fail "$REMINDER missing or empty; the shipped hook prints nothing"
+for d in $SKILLS; do
+    [ -s "$d/SKILL.md" ] || fail "$d/SKILL.md missing or empty"
+    [ -s "$d/REMINDER.md" ] || fail "$d/REMINDER.md missing or empty; the shipped hook prints nothing for it"
+done
 ok "shipped hooks are present, valid and runnable"
 
 # --- the manifest every install reads -----------------------------------------
@@ -257,6 +268,37 @@ else
         fail "no LICENSE file, but the frontmatter declares one"
     else
         fail "no LICENSE file"
+    fi
+fi
+
+# --- no shipped file may hard-code a name the manifest can change ------------------
+# The hook once announced a plugin name in its header. A rename turned that into a false
+# provenance claim in the one text this plugin asks the model to trust, and no test read
+# it, so everything stayed green while it was wrong.
+name=$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["name"])' 2>/dev/null)
+if [ -n "$name" ]; then
+    # The REMINDER files ARE the hook's output, so scanning only hooks/ missed the place
+    # the stale name actually lived: an opening line telling every session the skill loads
+    # at an address the rename had already invalidated.
+    if grep -rqE "(installed (crosscheck|building|kiss) plugin|as .(crosscheck|building|kiss):)" \
+            hooks/ skills/ 2>/dev/null; then
+        fail "a shipped file hard-codes a plugin name or skill address; derive it or reword"
+    else
+        ok "no shipped file hard-codes a plugin name or skill address"
+    fi
+fi
+
+# --- a declared version with no tag is a claim with no evidence -----------------
+# The building skill states this rule; enforcing it here is what makes it a wall rather
+# than advice, and forgetting the tag is precisely what happens after the work feels done.
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+    v=$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])' 2>/dev/null)
+    if [ -n "$v" ]; then
+        if git rev-parse "v$v" >/dev/null 2>&1; then
+            ok "v$v is tagged"
+        else
+            warn "version $v has no tag v$v yet; tag it as part of the release"
+        fi
     fi
 fi
 

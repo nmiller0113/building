@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""
+            "command": "s=\"${CLAUDE_PLUGIN_ROOT:-}/hooks/session-start.py\"; [ -f \"$s\" ] || exit 0; for py in python3 python; do command -v \"$py\" >/dev/null 2>&1 && exec \"$py\" \"$s\"; done; exit 0"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_PLUGIN_ROOT:-}/hooks/workorder-gate.py\"; [ -f \"$g\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; exec python3 \"$g\""
+            "command": "s=\"${CLAUDE_PLUGIN_ROOT:-}/hooks/workorder-gate.py\"; [ -f \"$s\" ] || exit 0; for py in python3 python; do command -v \"$py\" >/dev/null 2>&1 && exec \"$py\" \"$s\"; done; exit 0"
           }
         ]
       }
