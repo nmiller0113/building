@@ -25,7 +25,7 @@ STATE = os.path.join(PROJ, ".claude", "workorder.json")
 
 # A transcript in the REAL shape: provenance fields present, most user rows not human.
 TRANSCRIPT = os.path.join(TMP, "t.jsonl")
-with open(TRANSCRIPT, "w") as f:
+with open(TRANSCRIPT, "w", encoding="utf-8") as f:
     rows = [
         {"type": "user", "promptSource": "typed", "origin": {"kind": "human"},
          "message": {"content": "please rebuild the work order gate properly"}},
@@ -62,7 +62,7 @@ def run(tool, tool_input, state=None, root=None, cwd=None, transcript=TRANSCRIPT
         except OSError:
             pass
     else:
-        with open(STATE, "w") as fh:
+        with open(STATE, "w", encoding="utf-8") as fh:
             json.dump(state, fh)
     payload = json.dumps({"tool_name": tool, "tool_input": tool_input,
                           "cwd": cwd or root or PROJ, "transcript_path": transcript})
@@ -378,7 +378,7 @@ print("--- CORPUS INTEGRITY ---")
 # test cases become one nonsense case and neither is exercised while the suite stays
 # green. This checks the battery's own corpus for that, because it happened twice.
 import ast as _ast
-_src = open(os.path.join(D, os.path.basename(__file__))).read()
+_src = open(os.path.join(D, os.path.basename(__file__)), encoding="utf-8").read()
 _merged = [e for n in _ast.walk(_ast.parse(_src)) if isinstance(n, _ast.List)
            for e in n.elts
            if isinstance(e, _ast.Constant) and isinstance(e.value, str)
@@ -398,7 +398,7 @@ print("--- SHIPPED WIRING ---")
 import json as _json
 _hj = os.path.join(D, "..", "hooks", "hooks.json")
 try:
-    _pre = _json.load(open(_hj))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    _pre = _json.load(open(_hj, encoding="utf-8"))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 except Exception as e:
     fails.append("WIRING: cannot read the PreToolUse command from hooks.json: %r" % (e,))
     _pre = None
@@ -414,20 +414,20 @@ if _pre:
         pass
     _pl = json.dumps({"tool_name": "Write", "tool_input": {"file_path": PROJ + "/a.py"},
                       "cwd": PROJ, "transcript_path": TRANSCRIPT})
-    _r = subprocess.run(["bash", "-c", _pre], input=_pl, text=True, capture_output=True,
+    _r = subprocess.run(["sh", "-c", _pre], input=_pl, text=True, capture_output=True,
                         env=_env)
     check("WIRING: a block survives the hooks.json command string", _r.returncode == 2,
           True, _r.stderr + _r.stdout)
     # and an allowed call must still come back 0 through the same wiring
-    with open(STATE, "w") as _f:
+    with open(STATE, "w", encoding="utf-8") as _f:
         json.dump(GOOD, _f)
-    _r2 = subprocess.run(["bash", "-c", _pre], input=_pl, text=True, capture_output=True,
+    _r2 = subprocess.run(["sh", "-c", _pre], input=_pl, text=True, capture_output=True,
                          env=_env)
     check("WIRING: an authorised call passes through it", _r2.returncode == 2, False,
           _r2.stderr + _r2.stdout)
     # dormant must be silent through the wiring too
     _env2 = {k: v for k, v in _env.items() if k != "WORKORDER_GATE"}
-    _r3 = subprocess.run(["bash", "-c", _pre], input=_pl, text=True, capture_output=True,
+    _r3 = subprocess.run(["sh", "-c", _pre], input=_pl, text=True, capture_output=True,
                          env=_env2)
     check("WIRING: dormant is a no-op through it", _r3.returncode != 0, False,
           "exit %d: %s" % (_r3.returncode, _r3.stderr))
@@ -436,12 +436,12 @@ if _pre:
     # case in this file while every assertion above stayed green: same shape as the
     # exit-code defect, one layer out.
     import re as _re
-    _m = _json.load(open(_hj))["hooks"]["PreToolUse"][0].get("matcher", "")
+    _m = _json.load(open(_hj, encoding="utf-8"))["hooks"]["PreToolUse"][0].get("matcher", "")
     for _tool in ("Bash", "Edit", "Write", "NotebookEdit"):
         check("WIRING: matcher routes %s" % _tool,
               not bool(_re.fullmatch(_m, _tool)), False, "matcher=%r" % _m)
     # ...and the reminder injector must be wired to every fresh-context boundary.
-    _ss = _json.load(open(_hj))["hooks"]["SessionStart"][0].get("matcher", "")
+    _ss = _json.load(open(_hj, encoding="utf-8"))["hooks"]["SessionStart"][0].get("matcher", "")
     for _src in ("startup", "resume", "clear", "compact"):
         check("WIRING: SessionStart covers %s" % _src,
               not bool(_re.fullmatch(_ss, _src)), False, "matcher=%r" % _ss)

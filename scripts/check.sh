@@ -25,6 +25,27 @@ RELEASE=0
 gate() { if [ "$RELEASE" -eq 1 ]; then fail "$1"; else warn "$1"; fi; }
 
 cd "$(dirname "$0")/.." || { printf 'FAIL  cannot cd to package root\n' >&2; exit 1; }
+
+# Python is optional to this validator, and its spelling is not universal: a stock Windows
+# install carries `python`, not `python3`. hooks/hooks.json already probes both spellings;
+# this file probed only `python3`, so on such a box every Python-backed check below went
+# quiet while the run still exited 0. Resolve it once, so every check agrees on what "no
+# Python" means. The absence is announced once below, after warn() exists.
+# NOTE: this probes the SPELLING, not the version. A box whose `python` is a Python 2 will
+# resolve here and then fail the compile and battery checks on py3-only syntax. That failure
+# is honest: hooks/hooks.json makes the same python3-then-python choice, so such a box really
+# cannot run this plugin. It is the interpreter that is wrong, not the files.
+PY=""
+for _c in python3 python; do
+    command -v "$_c" >/dev/null 2>&1 || continue
+    # Probe the VERSION, not just the spelling. On a box where `python` is 2.7 and python3 is
+    # absent, taking the spelling alone would run py_compile and the gate battery under 2.7
+    # against py3-only syntax, and the run would FAIL blaming the shipped files rather than
+    # the interpreter.
+    "$_c" -c 'import sys; sys.exit(sys.version_info[0] < 3)' 2>/dev/null || continue
+    PY=$_c; break
+done
+
 SKILLS="skills/building skills/crosscheck"
 SKILLS_MD="skills/building/SKILL.md skills/crosscheck/SKILL.md"
 # Deep validation loops over EVERY skill. Hardcoding one meant naming a new
@@ -55,6 +76,14 @@ fail() { printf 'FAIL  %s\n' "$1" >&2; fails=$((fails + 1)); }
 warn() { printf 'WARN  %s\n' "$1" >&2; warns=$((warns + 1)); }
 ok()   { printf 'ok    %s\n' "$1"; }
 done_() { printf '\n%d fail, %d warn\n' "$fails" "$warns"; [ "$fails" -eq 0 ]; }
+
+# ONE announcement covering every Python-backed check in this file, not one per site. Two of
+# them used to be unguarded and simply vanished; the other five guarded correctly and skipped
+# in silence. Either way the run printed a clean result having verified less than it claimed.
+# Stating it once here is the only form that stays true as sites are added.
+# Under --release this is a failure rather than a warning: a release cannot be certified by a
+# run that could not read the manifest, compile the hooks, or check that the version is tagged.
+[ -n "$PY" ] || gate "no Python 3 on PATH as python3 or python; every Python-backed check in this file is SKIPPED"
 
 for SKILL in $SKILLS_MD; do
     [ -f "$SKILL" ] || { fail "$SKILL not found"; done_; exit 1; }
@@ -181,7 +210,7 @@ for f in $SHIPPED; do
     # deliberately narrow: this file IS scanned for private tokens (below), which is the
     # check that matters and the one an earlier version wrongly exempted itself from.
     case "$f" in scripts/check.sh) continue ;; esac
-    # A CRLF shebang is an exec failure the executable-bit check cannot see.
+    # A CRLF line ending is a start-up failure no other check in this file can see.
     if grep -q $'\r' "$f"; then
         fail "$f has CRLF line endings; convert to LF"
     fi
@@ -190,7 +219,20 @@ for f in $SHIPPED; do
     if grep -qE '\.\./' "$f"; then
         fail "$f contains a '../' path segment; it can smuggle a local path past the mask"
     fi
-    if grep -E '(/home/|/Users/|~/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\b([a-z0-9-]+\.)+(local|lan|internal)\b|\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b)' "$f" >/dev/null; then
+    # POSIX ERE only, no \b. \b is a GNU extension rather than standard ERE: where a grep
+    # lacks it, it degrades to a literal "b" and the internal-hostname and IP alternatives
+    # match nothing while the scan still prints "ok" -- a leak check that fails open and
+    # silently. This is NOT a macOS story: Apple's grep passes REG_ENHANCED, which enables \b,
+    # and FreeBSD's bsdgrep links libregex, which also honours it -- both verified, one of them
+    # on a real Mac. POSIX ERE simply does not define \b, so the risk is a non-GNU libc regex
+    # engine such as musl. That case is plausible and was NOT reproduced, so it is a reason to
+    # prefer the portable spelling, not a bug anyone has observed.
+    # The boundary class is the complement of \w, [^A-Za-z0-9_], because that is exactly what
+    # \b is a boundary BETWEEN. Writing it as [^A-Za-z0-9._-] instead, which looks more
+    # careful, silently stops matching a host or an IP that is adjacent to a dot or a hyphen:
+    # x.192.168.1.1 and box.local-x both went undetected. Checked against \b across a corpus
+    # including those adjacencies, and unlike \b it means the same thing everywhere.
+    if grep -E '(/home/|/Users/|~/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(^|[^A-Za-z0-9_])([a-z0-9-]+\.)+(local|lan|internal)([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_])[0-9]{1,3}(\.[0-9]{1,3}){3}([^A-Za-z0-9_]|$))' "$f" >/dev/null; then
         fail "$f contains a local path, address, internal hostname, or IP"
     else
         ok "$f: no local paths, addresses or hosts"
@@ -225,8 +267,8 @@ fi
 # --- the shipped hooks must actually be able to run ---------------------------
 if [ ! -s hooks/hooks.json ]; then
     fail "hooks/hooks.json missing or empty; nothing this plugin ships would register"
-elif command -v python3 >/dev/null 2>&1 \
-        && ! python3 -c 'import json,sys;json.load(open(sys.argv[1]))' hooks/hooks.json 2>/dev/null; then
+elif [ -n "$PY" ] \
+        && ! "$PY" -c 'import json,sys;json.load(open(sys.argv[1]))' hooks/hooks.json 2>/dev/null; then
     fail "hooks/hooks.json is not valid JSON; the hooks will not register"
 else
     for ref in hooks/session-start.py hooks/workorder-gate.py; do
@@ -234,11 +276,15 @@ else
     done
 fi
 [ -s hooks/session-start.py ] || fail "hooks/session-start.py missing or empty"
-[ -x hooks/session-start.py ] || fail "hooks/session-start.py is not executable"
+# No executable-bit check. hooks.json runs both files by handing the path to a probed
+# interpreter, which reads them and never needs the bit, so the check tested a property
+# nothing here consults. The bit is also not portable -- git on Windows does not track it --
+# but that is the lesser reason and it cuts both ways, since MSYS reports a shebang'd file as
+# executable regardless. The load-bearing reason is the first one.
 [ -s hooks/workorder-gate.py ] || fail "hooks/workorder-gate.py missing or empty"
-command -v python3 >/dev/null 2>&1 && { python3 -m py_compile hooks/session-start.py 2>/dev/null \
+[ -n "$PY" ] && { "$PY" -m py_compile hooks/session-start.py 2>/dev/null \
     || fail "hooks/session-start.py does not compile"; }
-command -v python3 >/dev/null 2>&1 && { python3 -m py_compile hooks/workorder-gate.py 2>/dev/null \
+[ -n "$PY" ] && { "$PY" -m py_compile hooks/workorder-gate.py 2>/dev/null \
     || fail "hooks/workorder-gate.py does not compile"; }
 rm -rf hooks/__pycache__ 2>/dev/null
 # The SessionStart hook prints this file and nothing else. Absent, it injects silently
@@ -253,8 +299,8 @@ ok "shipped hooks are present, valid and runnable"
 MAN=".claude-plugin/plugin.json"
 if [ ! -s "$MAN" ]; then
     fail "$MAN missing or empty; the plugin cannot install"
-elif command -v python3 >/dev/null 2>&1; then
-    if ! python3 -c 'import json,sys
+elif [ -n "$PY" ]; then
+    if ! "$PY" -c 'import json,sys
 d = json.load(open(sys.argv[1]))
 missing = [k for k in ("name", "description", "version") if not d.get(k)]
 sys.exit(1 if missing else 0)' "$MAN" 2>/dev/null; then
@@ -265,8 +311,8 @@ sys.exit(1 if missing else 0)' "$MAN" 2>/dev/null; then
 fi
 
 # --- the gate's own battery must pass, not merely compile ---------------------
-if [ -f scripts/gate-test.py ] && command -v python3 >/dev/null 2>&1; then
-    if python3 scripts/gate-test.py >/dev/null 2>&1; then
+if [ -f scripts/gate-test.py ] && [ -n "$PY" ]; then
+    if "$PY" scripts/gate-test.py >/dev/null 2>&1; then
         ok "gate battery passes"
     else
         fail "scripts/gate-test.py FAILS; the shipped gate does not behave as tested"
@@ -288,7 +334,8 @@ fi
 # The hook once announced a plugin name in its header. A rename turned that into a false
 # provenance claim in the one text this plugin asks the model to trust, and no test read
 # it, so everything stayed green while it was wrong.
-name=$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["name"])' 2>/dev/null)
+name=""
+[ -n "$PY" ] && name=$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["name"])' 2>/dev/null)
 if [ -n "$name" ]; then
     # The REMINDER files ARE the hook's output, so scanning only hooks/ missed the place
     # the stale name actually lived: an opening line telling every session the skill loads
@@ -305,7 +352,8 @@ fi
 # The building skill states this rule; enforcing it here is what makes it a wall rather
 # than advice, and forgetting the tag is precisely what happens after the work feels done.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-    v=$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])' 2>/dev/null)
+    v=""
+    [ -n "$PY" ] && v=$("$PY" -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])' 2>/dev/null)
     if [ -n "$v" ]; then
         if git rev-parse "v$v" >/dev/null 2>&1; then
             ok "v$v is tagged"

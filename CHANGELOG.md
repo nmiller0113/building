@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.1.5
+
+Portability. Nothing here changes what the skills say or how the gate decides on a machine
+that already worked; it removes assumptions about the machine the plugin was written on.
+
+**The release validator could certify a release it had not checked.** It resolved its
+interpreter as `python3` only, while the shipped hooks have always probed `python3` then
+`python`. Two of its checks were not guarded at all and fed an empty variable into an
+emptiness test, so on a box carrying only `python` the hard-coded-name scan and the
+version-has-a-tag gate silently did nothing and the run still printed a clean result. The
+gate that makes the tagging rule a wall rather than advice was the first wall to go. The
+interpreter is now resolved once, both spellings, and its major version is probed rather than
+inferred from the name. Its absence is announced once, and under `--release` it is a failure:
+a release cannot be certified by a run that could not read the manifest or check the tag.
+
+**The gate battery crashed on a stock Windows Python.** `gate-test.py` read its own source in
+the locale encoding to check its corpus for a known defect; the file carries a non-ASCII
+character that cp1252 cannot decode, so all 224 cases died before the first one ran. Every
+read and write in the gate and its battery now names UTF-8, which also repairs the transcript
+read that decides whether a work order's quote appears in something you actually typed.
+
+**`WORKORDER_GATE_EXEMPT` was split on a literal colon**, which is the drive separator on
+Windows: `C:\work\repo` became `C` plus `\work\repo`, two exemptions matching nothing and the
+real one gone. It splits on the platform's own path separator now, unchanged on macOS and
+Linux.
+
+**An inline interpreter body writing only to exempt paths was never relieved on Windows**,
+because that relief recognised a quoted path only when it began with `/` or `~`. It now also
+recognises a drive letter and a UNC prefix. The direction of the old bug was safe, blocking
+rather than allowing, but it made an exempt path unwritable by heredoc.
+
+The publish-time leak scan no longer uses `\b`, which is a GNU extension rather than standard
+ERE. Apple's grep honours it; a minimal grep such as busybox does not, and there the
+internal-hostname and IP alternatives match nothing while the scan still prints "ok". The
+replacement was checked to match the original identically under GNU grep.
+
+The executable-bit assertions on the hook scripts are gone. `hooks.json` hands each path to an
+interpreter, which reads the file and never consults the bit.
+
+README: the Requirements section said no particular shell was assumed. A hook's command string
+runs through a shell and both of this plugin's are POSIX, so Git Bash is a real requirement on
+Windows. It says so now, and says what each hook does without it, including that the
+work-order gate reports an error on every file-changing and Bash call and enforces nothing.
+
+New `.gitattributes` pinning LF. Without it a Windows clone rewrites every tracked file to
+CRLF, which breaks a script's first line and trips the validator's own CRLF check, so the
+repository would reject its own checkout.
+
 ## 2.1.4
 
 The audit line a denial writes now names what was stopped. It used to carry the block

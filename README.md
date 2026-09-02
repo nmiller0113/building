@@ -88,7 +88,9 @@ Armed, it enforces two things:
 ```
 
 Optional environment variables: `WORKORDER_GATE_STATE` moves the file,
-`WORKORDER_GATE_EXEMPT` takes colon-separated path prefixes needing no work order,
+`WORKORDER_GATE_EXEMPT` takes path prefixes needing no work order, separated by your
+platform's path separator (`:` on macOS and Linux, `;` on Windows, because a Windows path
+already contains a colon),
 `WORKORDER_GATE_MAX_AGE_H` sets how long an order stays valid (default 12), and
 `WORKORDER_GATE_IGNORE_PREFIXES` marks message prefixes that are not you, for setups that
 inject scheduled prompts. Add `.claude/workorder.json` and its `.log` sibling to your
@@ -118,9 +120,28 @@ sentence still matches the sentence.
 
 ## Requirements
 
-Python 3 on PATH, as `python3` or `python`. Both hooks probe for it and do nothing at all
-if neither is there, so the plugin degrades to plain skills rather than erroring. Nothing
-else is assumed: no particular shell, no distro, no path layout.
+Python 3 on PATH, as `python3` or `python`. Both hooks probe for both spellings and do
+nothing at all if neither is there, so the plugin degrades to plain skills rather than
+erroring.
+
+A POSIX shell for the hooks themselves. Claude Code runs a hook's command string through a
+shell (`sh` on macOS and Linux, Git Bash on Windows), and the two command strings this
+plugin registers are POSIX shell, so they need one of those.
+
+**On Windows without Git Bash, install Git Bash before relying on the gate.** Claude Code
+falls back to PowerShell there, which cannot parse either command string, and the two hooks
+degrade differently:
+
+- **The skills still load and work normally.** They are text and need no shell.
+- **The `SessionStart` reminder** reports one non-blocking hook error at boot and prints
+  nothing. You lose the always-on summary, not the skills.
+- **The work-order gate enforces nothing.** It is a `PreToolUse` hook, so the failure is not
+  a one-off at start-up: it reports a non-blocking hook error on *every* file-changing and
+  Bash call, and because a non-zero exit that is not 2 does not block, every one of those
+  calls proceeds ungated. Setting `WORKORDER_GATE=1` on such a box gives you the errors
+  without the gate.
+
+No distro is assumed, no package manager, and no path layout.
 
 ## Pairs well with kiss
 

@@ -1,0 +1,7 @@
+# Normalise text files to LF in the repository and on checkout, on every platform.
+#
+# Without this, a Windows clone with core.autocrlf=true rewrites tracked files to CRLF and
+# breaks two things at once: a shell script carrying CRLF fails to start with a confusing
+# "bad interpreter" error, and scripts/check.sh explicitly fails any shipped file that
+# contains CRLF, so the repository would reject its own checkout.
+* text=auto eol=lf

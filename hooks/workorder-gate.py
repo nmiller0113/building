@@ -34,7 +34,8 @@ CONFIGURATION (all optional, all environment):
   WORKORDER_GATE          set to 1 to ARM the gate. Dormant otherwise.
   CLAUDE_PROJECT_DIR      project root. Falls back to the payload's cwd, then $HOME.
   WORKORDER_GATE_STATE    work-order path. Default <root>/.claude/workorder.json
-  WORKORDER_GATE_EXEMPT   colon-separated extra path prefixes needing no work order.
+  WORKORDER_GATE_EXEMPT   extra path prefixes needing no work order, separated by the
+                          platform's path separator (":" on macOS and Linux, ";" on Windows).
   WORKORDER_GATE_MAX_AGE_H  work-order lifetime in hours. Default 12.
   WORKORDER_GATE_IGNORE_PREFIXES  colon-separated message prefixes treated as not-the-user.
 """
@@ -917,7 +918,11 @@ def _exempt_prefixes(root, state, log):
     # silently disable the whole gate.
     if not (root == tmp or root.startswith(tmp + os.sep)):
         out.append(tmp + os.sep)
-    for extra in (os.environ.get("WORKORDER_GATE_EXEMPT") or "").split(":"):
+    # os.pathsep, not a literal colon: on Windows the colon is the drive separator, so
+    # splitting "C:\\work\\repo" on ":" yields "C" and "\\work\\repo" -- two bogus exemptions
+    # and the real one silently gone. This is the platform's own list separator, so it stays
+    # ":" everywhere it already was and becomes ";" only where a path can contain a colon.
+    for extra in (os.environ.get("WORKORDER_GATE_EXEMPT") or "").split(os.pathsep):
         extra = extra.strip()
         if extra:
             out.append(os.path.realpath(os.path.abspath(os.path.expanduser(extra))))
@@ -944,7 +949,7 @@ def log(logpath, m):
         d = os.path.dirname(logpath)
         if d:
             os.makedirs(d, exist_ok=True)
-        with open(logpath, "a", errors="backslashreplace") as f:
+        with open(logpath, "a", encoding="utf-8", errors="backslashreplace") as f:
             f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " " + m + "\n")
     except Exception:
         pass
@@ -1009,7 +1014,7 @@ def open_fail(logpath, reason):
 
 def order(state, ignore_age=False):
     try:
-        with open(state) as f:
+        with open(state, encoding="utf-8") as f:
             o = json.load(f)
     except Exception:
         return None
@@ -1044,7 +1049,7 @@ def _user_rows(path):
     ignore = [p for p in (os.environ.get("WORKORDER_GATE_IGNORE_PREFIXES") or "").split(":") if p]
     out = []
     has_provenance = False
-    with open(path, errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             # Provenance must be a FIELD on a user-role row. The old substring sniff
             # ('"origin" in line') flipped the whole file into provenance mode when a
@@ -1061,7 +1066,7 @@ def _user_rows(path):
                     ("promptSource" in r or "origin" in r):
                 has_provenance = True
                 break
-    with open(path, errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             if '"user"' not in line and '"queue-operation"' not in line:
                 continue
@@ -1154,6 +1159,15 @@ suggestion, or silence is not one. Ask. Ambiguous authorisation IS NO authorisat
 def main():
     if os.environ.get("WORKORDER_GATE") != "1":
         return                                  # dormant unless armed
+    # The payload arrives on a pipe, and a pipe decodes in the locale encoding, which on
+    # Windows is the ANSI code page rather than UTF-8. The hook is handed JSON containing
+    # whatever the user typed, so a non-ASCII character would mis-decode and the verbatim
+    # quote check would then fail to find words that are genuinely there. Everything else in
+    # this file already names UTF-8 explicitly; this is the one input that could not.
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass        # reconfigure is 3.7+; on anything older the locale default has to do
     raw = sys.stdin.read()
     if not raw.strip():
         return
@@ -1217,7 +1231,13 @@ def main():
         if interp:
             # Class written [/~] rather than the other order: the release validator scans
             # this file for local paths, and the reversed spelling is itself one.
-            quoted = re.findall(r"""['"]([/~][^'"]*)['"]""", cmd)
+            # A Windows absolute path is neither: it is a drive letter and a colon, or a UNC
+            # double backslash. Recognising only the POSIX shapes meant that on Windows this
+            # relief never fired at all and every exempt-path heredoc was blocked. Collecting
+            # MORE quoted paths can only make the relief harder to earn, never easier, since
+            # every one of them must be exempt for it to apply.
+            quoted = re.findall(
+                r"""['"]((?:[/~]|[A-Za-z]:[\\/]|\\\\)[^'"]*)['"]""", cmd)
             if quoted and all(_is_exempt(q, exempt, state, deleting) for q in quoted):
                 interp = False
         unknown = unrecognised_heads(cmd)
