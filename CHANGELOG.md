@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.2
+
+Fixes a test case added in 2.1.1 that used a literal path the harness does not exempt, so
+it reported a false positive against its own suite. 2.1.1 shipped with that suite failing.
+The case is now built from the harness's real exempt directory.
+
 ## 2.1.1
 
 Two fixes reported from another install running these plugins, both false positives that

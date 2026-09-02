@@ -200,8 +200,6 @@ LEGIT = [
     "cat urls.txt | xargs -n1 curl -sI",
     "ls | parallel gunzip -t",
     "echo `date`",
-    # field report: an interpreter body writing to an EXEMPT path is not work
-    "python3 -c \"open('/tmp/x/a','w')\"",
 ]
 
 # ---- WRITES: accidental file changes. An allow here is a FALSE NEGATIVE. -------------
@@ -330,6 +328,12 @@ for c in LEGIT:
         fp += 1
     check("LEGIT: " + c.replace("\n", "\\n")[:70], blocked, False, out)
 print("  false positives: " + str(fp) + "/" + str(len(LEGIT)))
+
+# field report: an interpreter body writing to an EXEMPT path is not work. Built from the
+# harness's real exempt dir rather than a literal, which is what made the first attempt at
+# this case a false positive against its own suite.
+LEGIT.append("python3 -c \"open('" + FAKE_TMP + "/note','w')\"")
+LEGIT.append("python3 - <<'E'\nopen('" + FAKE_TMP + "/n','w').write('x')\nE")
 
 print("--- WRITES (must BLOCK; no work order open) ---")
 fn = 0
