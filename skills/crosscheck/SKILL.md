@@ -6,13 +6,11 @@ license: MIT
 
 # crosscheck
 
-Build against the real contract, then send the change for an independent adversarial
-review that is bounded at both ends: bounded in how wide it looks, and bounded in how
-many times it may run.
+Build against the real contract, then send the change for an independent adversarial review
+bounded at both ends: in how wide it looks, and in how many times it may run.
 
-Two failures this prevents, and they pull in opposite directions. Shipping a build
-nobody checked. And a review loop that never terminates, because every fix is itself new
-work to find fault with.
+Two failures this prevents, pulling in opposite directions: shipping a build nobody checked,
+and a review loop that never terminates, because every fix is itself new work to fault.
 
 ## The method
 
@@ -35,9 +33,8 @@ so it is not decided per task.
 
 ## Everything gets reviewed. All means all.
 
-Not just the code that looked risky. Scripts and programs, hooks, service units and
-timers, permission rules, prompts and templates, and **the skill files themselves**,
-including this one.
+Not just the code that looked risky. Scripts and programs, hooks, service units and timers,
+permission rules, prompts and templates, and **the skill files themselves**, including this one.
 
 The characteristic failure is not skipping the review outright. It is narrowing the rule
 until the thing in front of you falls just outside it. This rule has been missed three
@@ -49,9 +46,8 @@ build, it counts.**
 ## The review's aperture is the diff. Nothing more.
 
 Two different things get called scope here, and confusing them is expensive. The section
-above is about WHICH ARTIFACTS get reviewed: all of them, no exemptions. This section is
-about HOW WIDE a single review may LOOK, and the answer is only at what the change
-touched.
+above is about WHICH ARTIFACTS get reviewed: all of them, no exemptions. This one is about
+HOW WIDE a single review may LOOK, and the answer is only at what the change touched.
 
 **A review prompt asks two questions and no others:**
 
@@ -70,15 +66,14 @@ Give the reviewer the diff and tell it the diff is the boundary. A finding it vo
 outside those two questions is **one line in the requester's backlog**: not a work item,
 not a fix, and not something they hear about mid-flight.
 
-**The mechanism, because knowing it is what stops the repeat.** An uncovered codebase
-plus a reviewer told to hunt equals an unbounded list. The reviewer is not wrong and the
-findings are not fake, which is exactly why this is seductive. Every finding is real.
-Every one is also manufactured by the prompt. Fix them, and the next round's prompt
-manufactures more, because a fix is new development and the aperture never narrowed.
-**A limit on review ROUNDS does not protect against this: it bounds how many times you
-look, not how widely.** And findings from a commissioned hunt, reported as though you
-stumbled on them, make a codebase look like it is falling apart when what actually
-happened is that you went looking without asking.
+**The mechanism, because knowing it is what stops the repeat.** An uncovered codebase plus
+a reviewer told to hunt equals an unbounded list. The reviewer is not wrong and the findings
+are not fake, which is exactly why this is seductive. Every finding is real; every one is
+also manufactured by the prompt. Fix them, and the next round's prompt manufactures more,
+because a fix is new development and the aperture never narrowed. **A limit on review ROUNDS
+does not protect against this: it bounds how many times you look, not how widely.** And
+findings from a commissioned hunt, reported as though you stumbled on them, make a codebase
+look like it is falling apart when you went looking without asking.
 
 **The one exception, and it is narrow:** a change that alters a SHARED contract, a
 function signature, a data shape, a permission rule, an injected surface, may have its
@@ -253,9 +248,8 @@ on them.** Prove the instrument can produce a different answer.
 
 ## Scope
 
-The boundary of the work is the boundary of the request. A defect you find outside the ask
-is **a sentence to the requester, not a task**, and when scope grows mid-build that is the
-signal to stop and check in, never to keep going because finishing feels cheaper.
-
-The kiss skill carries that discipline in full and pairs well with this one. It is a
-companion, not a dependency: crosscheck works without it.
+The boundary of the work is the boundary of the request: a defect outside the ask is **a
+sentence to the requester, not a task**, and scope growing mid-build is the signal to stop
+and check in, **never to keep going because finishing feels cheaper**. The kiss skill carries
+that discipline in full and pairs well with this one: a companion, not a dependency, and
+crosscheck works without it.

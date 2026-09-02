@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.4
+
+The audit line a denial writes now names what was stopped. It used to carry the block
+message's first line, which for a Bash denial is the generic "file change via Bash" and
+identifies no target, so the log could say a write was refused but not which one. The
+reason and the target are passed explicitly now: `BLOCKED <tool> <reason>; <target>`.
+
+Two hardening fixes came out of reviewing that. A target containing a newline could have
+forged a second log line, so all whitespace in an audit field is collapsed. And a lone
+surrogate in a path or in a work order's scope made the log write raise, whereupon the
+blanket exception around it discarded the whole line rather than the bad character,
+erasing exactly the denial record the log exists to keep.
+
+The crosscheck skill body is back inside the house length target, reached by tightening
+four passages rather than by dropping any rule.
+
 ## 2.1.3
 
 Denials were never recorded. The log carried only what got through: the verified passes,

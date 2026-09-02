@@ -944,26 +944,55 @@ def log(logpath, m):
         d = os.path.dirname(logpath)
         if d:
             os.makedirs(d, exist_ok=True)
-        with open(logpath, "a") as f:
+        with open(logpath, "a", errors="backslashreplace") as f:
             f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " " + m + "\n")
     except Exception:
         pass
 
 
-def block(msg, logpath=None, tool=""):
+def _audit(s):
+    # Collapse ALL whitespace. A target path containing a newline would otherwise forge
+    # a second log line, and several of the reasons are deliberately multi-line prose.
+    #
+    # Then force the result to encodable text. A lone surrogate reaching the log write
+    # raises, and log()'s blanket except swallows the ENTIRE line rather than the bad
+    # character, so a crafted path or work-order scope could erase the denial record
+    # this function exists to preserve. The log is opened tolerantly as well: that
+    # covers the callers who do not come through here.
+    s = " ".join(str(s).split())[:200]
+    return s.encode("utf-8", "backslashreplace").decode("utf-8", "replace")
+
+
+def block(msg, logpath=None, tool="", reason="", detail=""):
     # A denial that left no trace made the gate unauditable: the log recorded only what
     # got THROUGH (VERIFY-OK, VERIFY-SKIPPED, FAIL-OPEN), never what was stopped, so a
-    # blocked write was invisible once the session ended. logpath stays optional so any
-    # future call site firing before _paths() resolves degrades to stderr, not a crash.
+    # blocked write was invisible once the session ended.
+    #
+    # An audit line has to answer three things: WHICH tool, WHY it was stopped, and WHAT
+    # it was about to touch. Scraping that out of the human-facing message only ever
+    # recovered the first line, which for a Bash denial is the generic "file change via
+    # Bash" and names no target at all. So reason and detail are passed explicitly and
+    # the message is left alone. The first-line fallback stays for any caller that
+    # supplies neither. logpath stays optional so a future call site firing before
+    # _paths() resolves degrades to stderr, not a crash.
     if logpath:
-        first = (msg.splitlines() or [""])[0]
-        # "BLOCKED <tool> " is the stable prefix a reader greps for, so strip the
-        # message's own redundant lead-in rather than emitting it twice.
-        if first.startswith("BLOCKED: "):
-            first = first[len("BLOCKED: "):]
-        if tool and first.startswith(tool + " "):
-            first = first[len(tool) + 1:]
-        log(logpath, "BLOCKED " + (tool or "?") + " " + first)
+        reason, detail = _audit(reason), _audit(detail)
+        line = "BLOCKED " + (tool or "?")
+        if reason or detail:
+            if reason:
+                line += " " + reason
+            if detail:
+                line += "; " + detail
+        else:
+            # Unused today, since every call site supplies a reason. Kept faithful to the
+            # derivation it replaced so a future bare call still greps as "BLOCKED <tool> ".
+            first = _audit((msg.splitlines() or [""])[0])
+            if first.startswith("BLOCKED: "):
+                first = first[len("BLOCKED: "):]
+            if tool and first.startswith(tool + " "):
+                first = first[len(tool) + 1:]
+            line += " " + first
+        log(logpath, line)
     print("work-order gate: " + msg, file=sys.stderr)
     sys.exit(2)
 
@@ -1144,11 +1173,11 @@ def main():
     state, logpath = _paths(root)
     exempt = _exempt_prefixes(root, state, logpath)
 
-    def require_order(what):
+    def require_order(what, detail=""):
         o = order(state)
         if not o:
             block("BLOCKED: " + what + "\n\n" + NO_ORDER.format(state=state),
-                  logpath, tool)
+                  logpath, tool, "no work order", detail or what)
         said = user_said(o.get("quote", ""), ev)
         if said is False:
             block("WORK ORDER QUOTE NOT FOUND IN ANYTHING THE USER TYPED.\n\n"
@@ -1156,7 +1185,7 @@ def main():
                   "It is not a verbatim fragment of any message the user typed in this\n"
                   "session. Either it was paraphrased, or it came from a hook, a loaded\n"
                   "skill, another agent, or the assistant's own earlier text.",
-                  logpath, tool)
+                  logpath, tool, "quote not in user text", detail or what)
         if said is None:
             log(logpath, "VERIFY-SKIPPED transcript unusable; allowing")
             notify("could not read the transcript; the quote was NOT verified.")
@@ -1168,7 +1197,7 @@ def main():
         path = str(inp.get("file_path") or inp.get("notebook_path") or "")
         if _is_exempt(path, exempt, state):
             return
-        require_order(tool + " " + path)
+        require_order(tool + " " + path, path)
         return
 
     if tool == "Bash":
@@ -1193,15 +1222,20 @@ def main():
                 interp = False
         unknown = unrecognised_heads(cmd)
         if targets or interp or unknown:
+            # `why` is for the human and may run to several lines; `audit` is the single
+            # line the log keeps, and it names the target wherever one is known.
             if targets:
-                why = "would write: " + ", ".join(targets[:3])
+                why = audit = "would write: " + ", ".join(targets[:3])
             elif unknown:
-                why = ("not a command known to only read: " + ", ".join(sorted(set(unknown))[:3])
+                audit = "not a command known to only read: " + ", ".join(sorted(set(unknown))[:3])
+                why = (audit
                        + "\n  This gate allowlists readers rather than listing writers, so a"
                        + "\n  command it does not recognise needs a work order.")
             else:
                 why = "an interpreter script body containing a write primitive"
-            require_order("file change via Bash\n\n  " + why)
+                # `quoted` is bound whenever interp is truthy, which is the only way here.
+                audit = why + ("; quoted: " + ", ".join(quoted[:3]) if quoted else "")
+            require_order("file change via Bash\n\n  " + why, audit)
 
         if not is_commit(cmd):
             return
@@ -1219,7 +1253,7 @@ def main():
                   "Run the review (aperture = this diff, two questions), then set\n"
                   '  "review_done": "<agent id / one-line verdict>"\n'
                   "in " + state + " and try again.",
-                  logpath, tool)
+                  logpath, tool, "review owed", str(o.get("scope", "?")))
 
 
 try:
