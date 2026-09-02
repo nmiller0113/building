@@ -1,7 +1,7 @@
 {
   "name": "building",
   "description": "How to build something and actually finish it: the order of work, an independent bounded review, and a version that is tagged, released and findable.",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "author": {
     "name": "Nathan Miller"
   },

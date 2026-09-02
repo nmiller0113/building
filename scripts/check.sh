@@ -199,6 +199,97 @@ for SKILL in $SKILLS_MD; do
     done < <(grep -oE '(\./)?(scripts|references|assets|hooks)/[A-Za-z0-9._/-]+' "$SKILL" | sort -u)
 done
 
+# --- the leak pattern, defined ONCE -------------------------------------------
+# One definition, used by the scan below AND by the self-test that guards it. Two copies
+# would drift, and the test would then certify a pattern that is not the one shipping.
+#
+# POSIX ERE only, no \b. \b is a GNU extension rather than standard ERE: where a grep lacks
+# it, it degrades to a literal "b" and the internal-hostname and IP alternatives match
+# nothing while the scan still prints "ok" -- a leak check that fails open, and silently.
+# This is NOT a macOS story: Apple's grep passes REG_ENHANCED, which enables \b, and
+# FreeBSD's bsdgrep links libregex, which also honours it, both verified and one of them on
+# a real Mac. POSIX ERE simply does not define \b, so the risk is a non-GNU libc regex engine
+# such as musl. That case is plausible and was NOT reproduced: it is a reason to prefer the
+# portable spelling, not a bug anyone has observed.
+#
+# The boundary class is the complement of \w, [^A-Za-z0-9_], because that is exactly what \b
+# is a boundary BETWEEN. Writing it as [^A-Za-z0-9._-] instead looks more careful and is
+# wrong: '.' and '-' are themselves non-word characters, so excluding them from the boundary
+# silently stops matching any host or address ADJACENT to one. See the corpus below.
+LEAK_RE='(/home/|/Users/|~/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(^|[^A-Za-z0-9_])([a-z0-9-]+\.)+(local|lan|internal)([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_])[0-9]{1,3}(\.[0-9]{1,3}){3}([^A-Za-z0-9_]|$))'
+
+# --- prove the leak pattern still discriminates, BEFORE trusting its results ---
+# This exists because a rewrite of the pattern once passed a hand-checked corpus and shipped
+# a weakened scan anyway: the corpus contained no host or address sitting NEXT TO a dot or a
+# hyphen, which is precisely the case the rewrite broke. A corpus that cannot fail is not a
+# test. The adjacency lines are the ones that discriminate, so do not trim them; the broken
+# pattern passes every non-adjacent line in this list and fails ten of these.
+leak_selftest() {
+    _lt=0
+    while IFS= read -r _line; do
+        case $_line in ''|'#'*) continue ;; esac
+        _want=${_line%% *}
+        _text=${_line#* }
+        if printf '%s\n' "$_text" | grep -qE "$LEAK_RE"; then _got=MATCH; else _got=CLEAN; fi
+        if [ "$_got" != "$_want" ]; then
+            fail "leak pattern self-test: expected $_want, got $_got, for: $_text"
+            _lt=1
+        fi
+    done <<'CORPUS'
+# Absolute paths and addresses
+MATCH /home/user/notes
+MATCH /Users/user/notes
+MATCH ~/secrets
+MATCH someone@example.com
+# Plain hosts and addresses
+MATCH box.local
+MATCH 192.168.1.1
+MATCH 10.0.0.254
+MATCH foo.bar.local
+MATCH http://box.local/
+# ADJACENT to punctuation. These are the discriminating cases: a boundary class that
+# wrongly excludes any of these characters passes every line above and fails here.
+MATCH Point your browser at box.local.
+MATCH Connect to 192.168.1.1.
+MATCH NAS.home.lan
+MATCH PVE-node1.lan
+MATCH DHCP pool 192.168.1.100-192.168.1.199
+MATCH api.internal.example.com
+MATCH x.192.168.1.1
+MATCH box.local-x
+MATCH wildcard cert for *.home.lan
+MATCH the .home.lan suffix is mDNS
+MATCH See host.internal;
+MATCH ssh 192.168.1.10:8006
+MATCH pve1.lan:8006
+MATCH ping 192.168.1.1, then
+MATCH host "box.local" here
+MATCH see (192.168.1.1)
+MATCH [10.0.0.5] bracketed
+# A tilde path must match whatever follows the slash. With only a non-dot example here,
+# narrowing the alternative to ~/[A-Za-z] would pass and stop matching every dotfile.
+MATCH ~/.ssh/id_rsa
+# Must stay clean: the words alone, and numbers that are not addresses
+CLEAN plain prose with nothing to hide
+CLEAN version 2.1.4 shipped today
+CLEAN the local variable is unset
+CLEAN lan party on friday
+CLEAN internal notes here
+CLEAN xbox.localhost
+CLEAN v1.2.3.4x
+CLEAN ratio 4:1
+CLEAN a.b
+CLEAN sort -V and readlink -f
+# Each of these fails if exactly ONE boundary is dropped, or the address dot unescaped.
+# v1.2.3.4x above is rejected by both boundaries at once and so cannot tell them apart.
+CLEAN v1.2.3.4
+CLEAN sha 1.2.3.4a
+CLEAN time 10:30:45:12 elapsed
+CORPUS
+    [ "$_lt" -eq 0 ] && ok "leak pattern matches its corpus, adjacency cases included"
+}
+leak_selftest
+
 # --- publishable: every shipped file ------------------------------------------
 # Modest by design. This catches the leaks that actually happen (a pasted path, a host,
 # an address); it is not a general secret scanner and is not claimed to be.
@@ -219,20 +310,8 @@ for f in $SHIPPED; do
     if grep -qE '\.\./' "$f"; then
         fail "$f contains a '../' path segment; it can smuggle a local path past the mask"
     fi
-    # POSIX ERE only, no \b. \b is a GNU extension rather than standard ERE: where a grep
-    # lacks it, it degrades to a literal "b" and the internal-hostname and IP alternatives
-    # match nothing while the scan still prints "ok" -- a leak check that fails open and
-    # silently. This is NOT a macOS story: Apple's grep passes REG_ENHANCED, which enables \b,
-    # and FreeBSD's bsdgrep links libregex, which also honours it -- both verified, one of them
-    # on a real Mac. POSIX ERE simply does not define \b, so the risk is a non-GNU libc regex
-    # engine such as musl. That case is plausible and was NOT reproduced, so it is a reason to
-    # prefer the portable spelling, not a bug anyone has observed.
-    # The boundary class is the complement of \w, [^A-Za-z0-9_], because that is exactly what
-    # \b is a boundary BETWEEN. Writing it as [^A-Za-z0-9._-] instead, which looks more
-    # careful, silently stops matching a host or an IP that is adjacent to a dot or a hyphen:
-    # x.192.168.1.1 and box.local-x both went undetected. Checked against \b across a corpus
-    # including those adjacencies, and unlike \b it means the same thing everywhere.
-    if grep -E '(/home/|/Users/|~/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(^|[^A-Za-z0-9_])([a-z0-9-]+\.)+(local|lan|internal)([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_])[0-9]{1,3}(\.[0-9]{1,3}){3}([^A-Za-z0-9_]|$))' "$f" >/dev/null; then
+    # LEAK_RE is defined and self-tested above. Do not inline a copy of it here.
+    if grep -E "$LEAK_RE" "$f" >/dev/null; then
         fail "$f contains a local path, address, internal hostname, or IP"
     else
         ok "$f: no local paths, addresses or hosts"

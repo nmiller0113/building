@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.1.6
+
+The release validator proves its leak pattern still discriminates before it trusts that
+pattern's results, and the pattern is now defined once instead of inlined at the scan site.
+
+This exists because the rewrite of that pattern in 2.1.5 was checked against a hand-made
+corpus that could not have failed: it contained no host or address sitting next to a dot or a
+hyphen, which is exactly what a wrong boundary class breaks. A corpus that cannot fail is not
+a test. This one can: substituting the wrong class flips ten of its lines, and the self-test
+turns that into a hard failure rather than a quiet one.
+
+The corpus covers hosts and addresses adjacent to a period, hyphen, colon, comma, quote,
+paren and bracket, with `host:port` and `IP:port` included because those are the shapes most
+likely to appear in a real document. It also covers a tilde dotfile path, which is what a
+narrowing of the tilde alternative would silently stop matching, and three clean lines that
+exist only to tell one dropped boundary from both at once, which the other clean lines
+cannot distinguish.
+
+Nothing changes for anyone installing the plugin: the skills, both hooks and the gate are
+untouched. This is the maintainer's validator guarding its own instrument.
+
 ## 2.1.5
 
 Portability. Nothing here changes what the skills say or how the gate decides on a machine
