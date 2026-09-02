@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.3
+
+Denials were never recorded. The log carried only what got through: the verified passes,
+the skipped verifications, the fail-opens. A blocked write left no trace once the session
+ended, so the one question an audit trail exists to answer was the one it could not. A
+denial now appends `BLOCKED <tool> <reason>` before the gate exits.
+
+Enforcement is unchanged. The stderr message, the exit code, and every decision the gate
+makes are the same. Reported from another install running these plugins.
+
 ## 2.1.2
 
 Fixes a test case added in 2.1.1 that used a literal path the harness does not exempt, so

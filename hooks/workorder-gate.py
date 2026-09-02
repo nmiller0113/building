@@ -950,7 +950,20 @@ def log(logpath, m):
         pass
 
 
-def block(msg):
+def block(msg, logpath=None, tool=""):
+    # A denial that left no trace made the gate unauditable: the log recorded only what
+    # got THROUGH (VERIFY-OK, VERIFY-SKIPPED, FAIL-OPEN), never what was stopped, so a
+    # blocked write was invisible once the session ended. logpath stays optional so any
+    # future call site firing before _paths() resolves degrades to stderr, not a crash.
+    if logpath:
+        first = (msg.splitlines() or [""])[0]
+        # "BLOCKED <tool> " is the stable prefix a reader greps for, so strip the
+        # message's own redundant lead-in rather than emitting it twice.
+        if first.startswith("BLOCKED: "):
+            first = first[len("BLOCKED: "):]
+        if tool and first.startswith(tool + " "):
+            first = first[len(tool) + 1:]
+        log(logpath, "BLOCKED " + (tool or "?") + " " + first)
     print("work-order gate: " + msg, file=sys.stderr)
     sys.exit(2)
 
@@ -1134,14 +1147,16 @@ def main():
     def require_order(what):
         o = order(state)
         if not o:
-            block("BLOCKED: " + what + "\n\n" + NO_ORDER.format(state=state))
+            block("BLOCKED: " + what + "\n\n" + NO_ORDER.format(state=state),
+                  logpath, tool)
         said = user_said(o.get("quote", ""), ev)
         if said is False:
             block("WORK ORDER QUOTE NOT FOUND IN ANYTHING THE USER TYPED.\n\n"
                   "  quote: " + str(o.get("quote", ""))[:160] + "\n\n"
                   "It is not a verbatim fragment of any message the user typed in this\n"
                   "session. Either it was paraphrased, or it came from a hook, a loaded\n"
-                  "skill, another agent, or the assistant's own earlier text.")
+                  "skill, another agent, or the assistant's own earlier text.",
+                  logpath, tool)
         if said is None:
             log(logpath, "VERIFY-SKIPPED transcript unusable; allowing")
             notify("could not read the transcript; the quote was NOT verified.")
@@ -1203,7 +1218,8 @@ def main():
                   "All new development gets reviewed, not just the code that looked risky.\n"
                   "Run the review (aperture = this diff, two questions), then set\n"
                   '  "review_done": "<agent id / one-line verdict>"\n'
-                  "in " + state + " and try again.")
+                  "in " + state + " and try again.",
+                  logpath, tool)
 
 
 try:
