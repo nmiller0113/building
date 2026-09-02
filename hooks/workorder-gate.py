@@ -1164,7 +1164,18 @@ def main():
         deleting = bool(re.search(r"(?:^|[\s;|&])(rm|rmdir|unlink|shred|mv)\s", cmd))
         targets = [t for t in bash_targets(cmd, cwd)
                    if not _is_exempt(t, exempt, state, deleting)]
+        # An inline interpreter body names its own paths, so honour the exemptions the
+        # shell path already honours: a body every one of whose quoted paths is exempt is
+        # writing somewhere the user said needs no order. Reported from the field, where
+        # it made an exempt file unwritable by heredoc while the same write through the
+        # Write tool passed.
         interp = interpreter_writes(cmd)
+        if interp:
+            # Class written [/~] rather than the other order: the release validator scans
+            # this file for local paths, and the reversed spelling is itself one.
+            quoted = re.findall(r"""['"]([/~][^'"]*)['"]""", cmd)
+            if quoted and all(_is_exempt(q, exempt, state, deleting) for q in quoted):
+                interp = False
         unknown = unrecognised_heads(cmd)
         if targets or interp or unknown:
             if targets:

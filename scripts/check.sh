@@ -126,8 +126,13 @@ for SKILL in $SKILLS_MD; do
         # Compare against the SKILL's own directory, not the package's. Comparing to
         # the package basename was right when a plugin held one skill and became
         # wrong the moment it held two.
-        [ "$name" = "$(basename "$(dirname "$SKILL")")" ] \
-            || warn "skill name '$name' does not match its directory '$(basename "$(dirname "$SKILL")")'"
+        # Only meaningful in a source checkout. An INSTALLED plugin lives in a directory
+        # named for its version, so this fired on every clone and was pure noise for
+        # anyone not developing in a directory named after the plugin. Reported from the
+        # field by another install.
+        if [ -d .git ] && [ "$name" != "$(basename "$(dirname "$SKILL")")" ]; then
+            warn "skill name '$name' does not match its directory '$(basename "$(dirname "$SKILL")")'"
+        fi
         ok "name: $name"
     fi
 

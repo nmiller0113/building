@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.1
+
+Two fixes reported from another install running these plugins, both false positives that
+made the tools obstructive rather than wrong:
+
+- The skill-name-versus-directory check fired on every installed copy, because an
+  installed plugin lives in a directory named for its version rather than for itself. It
+  is a development hint, so it now runs only in a source checkout.
+- An inline interpreter body containing a write primitive was blocked regardless of where
+  it wrote, so a file inside an exempt path could not be written that way even though the
+  same write through the editing tools passed. The shell path already honoured
+  exemptions; this one never consulted them.
+
 ## 2.1.0
 
 Two release rules the skill was missing, both learned by falling into them while
