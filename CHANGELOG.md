@@ -1,5 +1,68 @@
 # Changelog
 
+## 2.2.0
+
+The crosscheck skill told you to do the wrong thing at the end of a review loop, and this
+version fixes that sentence.
+
+It read: a cycle returning clean, or with only mediums and lows, "is a loop that CONVERGED.
+Those get fixed, those fixes still get their own review, and the work is reported as done."
+So convergence, which is supposed to be the end, instead handed over a queue. Work through
+it and each fix is new development needing its own review, which produces new findings,
+which are also real. The skill warns about exactly that regress in its aperture section and
+then instructed it here.
+
+Convergence is a STOP now, and the leftover mediums and lows are a report rather than a
+queue. Acting on them is new scope: it goes to the requester with a recommendation, and that
+recommendation defaults to fixing none of them.
+
+Two things travel with that. A severity word is an inflated claim unless it carries the
+condition that triggers it, because the reviewer graded the artifact in isolation and cannot
+know what makes a finding rare in the real deployment; relaying its label unweighted is how a
+narrow race arrives sounding like a fire, and a yes obtained that way was manufactured rather
+than given. And when findings start landing only in machinery added after convergence rather
+than in the work that was asked for, the loop is eating itself, which is the last honest
+place to stop.
+
+The operational form of all three lives in the shipped REMINDER, so it reaches a session
+whether or not the skill is ever invoked; the skill body carries only the reasoning, and
+stays inside its length target.
+
+The work-order gate also stopped wedging a session after a restart.
+
+A work order stays valid for WORKORDER_GATE_MAX_AGE_H hours, twelve by default, but the
+quote proving a human asked for the work was only ever checked against the CURRENT
+session's transcript. So any restart inside that window carried a live order into a
+session that could not verify it, and the gate read the missing quote as the thing it
+exists to stop: an assistant authorising itself. Every command whose head is not on the
+READ_ONLY allowlist then hard-blocked until the order aged out. Observed in the field as
+roughly eight hours of blocking after an unattended overnight restart.
+
+The two causes of an unfindable quote are not alike. One is a paraphrased or invented
+quote, which must block. The other is an order whose verifying session is simply gone,
+which must not. An order belonging to a dead session is now allowed through with a logged
+warning saying its quote was not re-verified, which is already how the gate behaves when
+the transcript cannot be read at all, so the two unverifiable cases finally act the same.
+An order opened DURING the session whose quote is not in that session's user text blocks
+exactly as before.
+
+What decides it is the work order FILE's own mtime, not anything written inside the file.
+That distinction is the whole design. The obvious implementation compares the order's
+`opened_at` against the session start, and it is wrong: `opened_at` is written by the
+assistant, which is the party this gate exists to distrust, so backdating one number would
+convert any invented quote, an empty one or none at all, into an allow-with-warning.
+It would also mean that editing a live order mid-session to carry a new quote left the
+fabrication check disarmed for the rest of the order's twelve hours. Writing the file is
+what sets its mtime, so neither move survives the mtime test. `opened_at` is kept as a
+corroborating claim and a non-empty quote is now required, but the file's own timestamp is
+the load-bearing one.
+
+Everything fails closed: an unreadable session start, an unparsable stamp, an unreadable
+mtime, a missing `opened_at`, or an absent quote all leave the block standing. What this
+does not stop is an assistant that both backdates `opened_at` and resets the file's mtime
+with an explicit utime call: an adversary controlling both the input and the check, which
+is the limit this hook has always stated and still does not claim to defeat.
+
 ## 2.1.6
 
 The release validator proves its leak pattern still discriminates before it trusts that

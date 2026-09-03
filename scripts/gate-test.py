@@ -55,7 +55,8 @@ STALE = dict(GOOD, opened_at=int(time.time()) - 13 * 3600)
 STALE_REVIEW = dict(NEEDS_REVIEW, opened_at=int(time.time()) - 13 * 3600)
 
 
-def run(tool, tool_input, state=None, root=None, cwd=None, transcript=TRANSCRIPT):
+def run(tool, tool_input, state=None, root=None, cwd=None, transcript=TRANSCRIPT,
+        state_mtime=None):
     if state is None:
         try:
             os.remove(STATE)
@@ -64,6 +65,10 @@ def run(tool, tool_input, state=None, root=None, cwd=None, transcript=TRANSCRIPT
     else:
         with open(STATE, "w", encoding="utf-8") as fh:
             json.dump(state, fh)
+        # A carried order is one whose FILE was last written in a dead session.
+        # Writing it here stamps mtime now, so a carried case must say otherwise.
+        if state_mtime is not None:
+            os.utime(STATE, (state_mtime, state_mtime))
     payload = json.dumps({"tool_name": tool, "tool_input": tool_input,
                           "cwd": cwd or root or PROJ, "transcript_path": transcript})
     env = dict(os.environ, WORKORDER_GATE="1", CLAUDE_PROJECT_DIR=root or PROJ,
@@ -373,6 +378,94 @@ for desc, (tool, ti), st, want in AUTH:
     blocked, out = run(tool, ti, st)
     check("AUTH: " + desc, blocked, want, out)
 
+# ---- CARRIED-OVER ORDERS ------------------------------------------------------------
+# The nightly restart carries a live work order into a session that cannot verify its
+# quote, because the session it was verifiable in is gone. That is not the fabrication
+# this gate exists to stop, and blocking it wedged every non-READ_ONLY command for the
+# rest of the order's 12h life. The two are told apart by opened_at vs session start.
+#
+# The transcript above deliberately carries NO timestamps, so session_start() returns
+# None there and the branch cannot fire, which is why every AUTH case above still
+# blocks. This section supplies one that does have a start stamp.
+print("--- CARRIED-OVER ORDERS ---")
+SESSION_START = int(time.time()) - 3600            # this session began an hour ago
+TRANSCRIPT_TS = os.path.join(TMP, "t-stamped.jsonl")
+with open(TRANSCRIPT_TS, "w", encoding="utf-8") as f:
+    # the harness writes untimestamped control rows before the first real one
+    f.write(json.dumps({"type": "last-prompt", "sessionId": "s1"}) + "\n")
+    f.write(json.dumps({"type": "mode", "sessionId": "s1"}) + "\n")
+    f.write(json.dumps({
+        "type": "attachment", "sessionId": "s1",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(SESSION_START)),
+    }) + "\n")
+    with open(TRANSCRIPT, encoding="utf-8") as src:
+        for line in src:
+            f.write(line)
+
+TRANSCRIPT_BAD = os.path.join(TMP, "t-badstamp.jsonl")
+with open(TRANSCRIPT_BAD, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type": "attachment", "timestamp": "not-a-timestamp-at-all"}) + "\n")
+    with open(TRANSCRIPT, encoding="utf-8") as src:
+        for line in src:
+            f.write(line)
+
+ABSENT = "a phrase the user never typed anywhere"
+CARRIED      = dict(GOOD, quote=ABSENT, opened_at=SESSION_START - 3000)   # before start
+SAME_SESSION = dict(GOOD, quote=ABSENT, opened_at=SESSION_START + 600)    # after start
+CARRIED_STALE = dict(CARRIED, opened_at=int(time.time()) - 13 * 3600)     # aged out too
+CARRIED_REVIEW = dict(CARRIED, review="required")
+
+WRITTEN_THEN = SESSION_START - 3000        # file last touched in the dead session
+NOQUOTE = {"scope": "x", "review": "not-required", "opened_at": SESSION_START - 3000}
+
+CARRY = [
+    # the bug this fixes: order FILE written before the session, quote unverifiable
+    ("order predating the session is carried, not blocked",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED, TRANSCRIPT_TS, WRITTEN_THEN, False),
+    # the case the gate exists for is untouched: opened DURING this session
+    ("order opened during the session still blocks",
+     ("Write", {"file_path": PROJ + "/a.py"}), SAME_SESSION, TRANSCRIPT_TS, None, True),
+    # THE ATTACK: backdating opened_at alone must buy nothing, because writing the
+    # file to backdate it is itself a write in THIS session.
+    ("backdated opened_at with a fresh file does NOT carry",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED, TRANSCRIPT_TS, None, True),
+    # the honest-mistake path: a live order edited mid-session to carry a new quote
+    ("order rewritten this session stops carrying",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED, TRANSCRIPT_TS,
+     SESSION_START + 60, True),
+    # an order that never had a quote never met the bar and must not reach the warning
+    ("empty quote never carries",
+     ("Write", {"file_path": PROJ + "/a.py"}), dict(CARRIED, quote=""),
+     TRANSCRIPT_TS, WRITTEN_THEN, True),
+    ("missing quote key never carries",
+     ("Write", {"file_path": PROJ + "/a.py"}), NOQUOTE, TRANSCRIPT_TS, WRITTEN_THEN, True),
+    # carrying does not resurrect an order that aged out
+    ("carried order still blocks once stale",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED_STALE, TRANSCRIPT_TS,
+     WRITTEN_THEN, True),
+    # fail closed: no readable session start means the branch does not apply
+    ("no session timestamp means the block stands",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED, TRANSCRIPT, WRITTEN_THEN, True),
+    # fail closed: an unparsable stamp is not guessed at
+    ("malformed session timestamp fails closed",
+     ("Write", {"file_path": PROJ + "/a.py"}), CARRIED, TRANSCRIPT_BAD, WRITTEN_THEN, True),
+    # the boundary itself is exclusive
+    ("opened_at equal to session start does not carry",
+     ("Write", {"file_path": PROJ + "/a.py"}), dict(CARRIED, opened_at=SESSION_START),
+     TRANSCRIPT_TS, WRITTEN_THEN, True),
+    # carrying clears the QUOTE only; an owed review still blocks the commit. The cp
+    # makes this reach require_order at all - a bare git commit never does.
+    ("carried order does not clear an owed review",
+     bash("cp " + PROJ + "/a.py " + PROJ + "/b.py && " + GIT + " -m x"),
+     CARRIED_REVIEW, TRANSCRIPT_TS, WRITTEN_THEN, True),
+    # a genuine quote is unaffected by any of this
+    ("real quote still allows under a stamped transcript",
+     ("Write", {"file_path": PROJ + "/a.py"}), GOOD, TRANSCRIPT_TS, None, False),
+]
+for desc, (tool, ti), st, tr, mt, want in CARRY:
+    blocked, out = run(tool, ti, st, transcript=tr, state_mtime=mt)
+    check("CARRY: " + desc, blocked, want, out)
+
 print("--- CORPUS INTEGRITY ---")
 # A missing comma makes Python silently concatenate two adjacent string literals, so two
 # test cases become one nonsense case and neither is exercised while the suite stays
@@ -492,7 +585,7 @@ check("ENV: unreadable transcript allows", blocked, False, out)
 if "NOT verified" not in out:
     fails.append("ENV: unreadable transcript did not warn that the quote was unverified")
 
-total = len(LEGIT) + len(WRITES) + len(AUTH) + 21
+total = len(LEGIT) + len(WRITES) + len(AUTH) + len(CARRY) + 21
 print()
 for f in fails:
     print("FAIL " + f)

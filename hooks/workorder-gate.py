@@ -39,7 +39,7 @@ CONFIGURATION (all optional, all environment):
   WORKORDER_GATE_MAX_AGE_H  work-order lifetime in hours. Default 12.
   WORKORDER_GATE_IGNORE_PREFIXES  colon-separated message prefixes treated as not-the-user.
 """
-import json, os, re, sys, tempfile, time
+import calendar, json, os, re, sys, tempfile, time
 
 DEFAULT_MAX_AGE_H = 12
 
@@ -1143,6 +1143,114 @@ def user_said(quote, ev):
     return False
 
 
+def session_start(tp):
+    """Epoch seconds of this session's first timestamped transcript row, or None.
+
+    WHY THIS EXISTS. `user_said` answers "is this quote in THIS session's user text",
+    and a False from it has two causes that are not alike: the assistant paraphrased or
+    invented the quote, or the work order was opened in an EARLIER session and the
+    session it was verifiable in is gone. Only the first is the thing this gate exists
+    to stop. Blocking the second wedged a whole morning after the nightly restart
+    carried a live order across the boundary: an order stays valid for
+    WORKORDER_GATE_MAX_AGE_H hours, so any restart inside that window turned every
+    command whose head is not on READ_ONLY into a hard block until the order aged out.
+
+    The two are told apart by asking whether the order predates this session. That
+    question needs an answer the ASSISTANT DOES NOT WRITE, because the whole point of
+    the gate is that the assistant is the distrusted party: `opened_at` is written by
+    the assistant, so on its own it would let a fabricated quote buy the warning path
+    for the price of one backdated number. So the state file's own mtime is the real
+    test, and `opened_at` is only a corroborating claim -- see `_predates_session`.
+
+    The scan is bounded, but the bound is not tight: a resumed or renamed session opens
+    with a batch of file-history-snapshot rows, and batches of ~55 have been measured on
+    a live box with one transcript holding 215 over its life. A prefix longer than the
+    bound returns None, which fails closed -- i.e. straight back to the wedge this fixes
+    -- so the bound is generous rather than minimal. It is still a bound: the loop stops
+    at the first timestamped row, which in 46 of 48 measured transcripts is line 0-7.
+    """
+    if not tp:
+        return None
+    try:
+        with open(tp, encoding="utf-8", errors="replace") as f:
+            for _ in range(2000):
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    ts = json.loads(line).get("timestamp")
+                except Exception:
+                    continue
+                if not isinstance(ts, str) or len(ts) < 20:
+                    continue
+                try:
+                    base = calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
+                except ValueError:
+                    return None
+                # The harness writes Zulu today. An offset form is not mis-read as UTC:
+                # silently dropping a +02:00 would widen the allow window by two hours.
+                tail = ts[19:]
+                if tail.endswith("Z"):
+                    return base
+                m = re.search(r"([+-])(\d{2}):?(\d{2})$", tail)
+                if not m:
+                    return None
+                off = (int(m.group(2)) * 3600) + (int(m.group(3)) * 60)
+                return base - off if m.group(1) == "+" else base + off
+    except Exception:
+        return None
+    return None
+
+
+def _predates_session(o, ev, state):
+    """True when this work order genuinely belongs to a session that has ended.
+
+    THREE conditions, and the mtime one is the load-bearing one:
+
+    1. The state file was last WRITTEN before this session began. Every ORDINARY way of
+       putting bytes in that file -- Write, Edit, a redirect, a plain cp, an editor's
+       rename-and-replace -- stamps mtime now, so an order backdated by editing
+       `opened_at` fails here, and so does a live order edited mid-session to carry a
+       new quote. What it is not is untouchable: `touch -d`, `cp -p` and an explicit
+       `os.utime` all set mtime backwards, and writes to this file are exempt from the
+       gate, so such a reset is neither blocked nor logged. There is no innocent reading
+       of those commands; this condition raises the cost of a fabricated authorisation
+       from one edited number to a deliberate act, which is the most a hook whose own
+       state the assistant must be able to write can do.
+    2. `opened_at` also predates the session. A corroborating claim, not the proof; it
+       keeps a file merely COPIED into place from reading as an old order.
+    3. There is a real quote to have failed on. An absent or empty `quote` never met the
+       bar in the first place and must not reach the warning path.
+
+    Fails CLOSED everywhere: an unreadable session start, an unreadable mtime, an
+    unusable `opened_at`, or a missing quote all leave the block standing. An order
+    opened DURING this session whose quote is not in this session's user text is the
+    fabrication case, and it keeps blocking exactly as before.
+
+    What this does NOT stop: an assistant that both backdates `opened_at` and resets the
+    file's mtime with an explicit utime call. That is an adversary controlling both the
+    input and the check, which is the limit this hook states in its header and does not
+    claim to defeat.
+    """
+    q = o.get("quote")
+    if not isinstance(q, str) or len(q.strip()) < 2:
+        return False
+    started = session_start(ev.get("transcript_path"))
+    if started is None:
+        return False
+    try:
+        written = os.path.getmtime(state)
+    except OSError:
+        return False
+    if written >= started:
+        return False
+    try:
+        opened = float(o.get("opened_at", 0))
+    except (TypeError, ValueError):
+        return False
+    return 0 < opened < started
+
+
 NO_ORDER = """NO WORK ORDER - blocked before a file change, by design.
 
 The user has not been shown to have asked for this. Before changing files, write
@@ -1193,6 +1301,11 @@ def main():
             block("BLOCKED: " + what + "\n\n" + NO_ORDER.format(state=state),
                   logpath, tool, "no work order", detail or what)
         said = user_said(o.get("quote", ""), ev)
+        if said is False and _predates_session(o, ev, state):
+            log(logpath, "CARRIED-OVER work order predates this session; not re-verified")
+            notify("this work order was opened before this session began, so its quote "
+                   "could NOT be re-verified here. Confirm the user still wants this work.")
+            return o
         if said is False:
             block("WORK ORDER QUOTE NOT FOUND IN ANYTHING THE USER TYPED.\n\n"
                   "  quote: " + str(o.get("quote", ""))[:160] + "\n\n"

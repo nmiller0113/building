@@ -104,28 +104,28 @@ budget in your own favour.
 
 **A cycle FAILS when the review returns a confirmed critical or high finding.** That
 definition is load-bearing: if mediums and lows counted, the loop would never converge.
-Mediums and lows are a sentence to the requester.
+Mediums and lows are a sentence to the requester, not a task list.
 
 **That severity test answers exactly one question: does the loop CONTINUE on this defect.
 It never decides whether new work gets reviewed.** Any code you write gets reviewed, full
 stop, including a fix for a low, a one-line hardening, and cleanup you did on your own
-initiative. The two questions look adjacent and are unrelated:
-
-| Question | Answered by |
-|:--|:--|
-| Does this code get reviewed? | Did I write it? Then yes. Always. |
-| Does the loop run another cycle on this defect? | Was the finding critical or high? |
+initiative. The two look adjacent and are unrelated: code gets reviewed if you wrote it,
+always; the loop runs another cycle only on a critical or high.
 
 **Count the cycles out loud as they happen**, in the message where each one lands, never
 reconstructed afterwards. A count you reassemble later is the count you talk yourself out
 of. State it plainly: "cycle 2 of 6".
 
-**First ask which ending happened. The terminator fires on SIX FAILURES, not on six
-cycles elapsed.** A sixth cycle that comes back clean, or with only mediums and lows, is a
-loop that CONVERGED. Those get fixed, those fixes still get their own review, and the work
-is reported as done. Converged means no cycle 7. It has never meant no review. Announcing
-"this is where the rule says we stop" over finished work describes a wall that was never
-hit, and tells the requester their thing is unfinished when it is not.
+**First ask which ending happened. The terminator fires on SIX FAILURES, not six cycles
+elapsed.** A cycle returning clean, or only mediums and lows, is a loop that CONVERGED and
+the work is done; announcing a stopping rule over finished work describes a wall never hit.
+**Convergence is a STOP, and the leftovers are a REPORT rather than a queue.** They look
+like a to-do list and will be read as one if handed over as one, so they arrive with a
+recommendation defaulting to fix none, each severity qualified by what must coincide for it
+to bite. The reviewer graded the artifact in isolation and cannot know what makes a finding
+rare in deployment; an unweighted label is how a narrow race arrives sounding like a fire,
+and a yes obtained that way is manufactured. Findings landing only in machinery added AFTER
+convergence mean the loop is eating itself, the last honest place to stop.
 
 **The severity call at cycle 6 is the reviewer's, not the builder's.** A confirmed
 critical or high you cannot refute on live evidence is a failure, and one you are unsure

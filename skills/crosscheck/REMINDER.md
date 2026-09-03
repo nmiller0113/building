@@ -32,11 +32,25 @@ text is not loaded, the statements below are the rule in effect.
   critical or high finding; mediums and lows are a sentence to the requester rather than
   another cycle. The same defect re-attempted under a new name is the same defect.
 - The terminator fires on six FAILURES rather than on six cycles elapsed. A cycle that
-  comes back clean, or with only mediums and lows, is a loop that converged: those fixes
-  still get reviewed, and the work is then done. Converged has never meant unreviewed, and
-  describing finished work as stopped by a rule reports a wall that was never hit.
-  The severity call at that last cycle belongs to the reviewer rather than the
-  builder, and an ambiguity at the terminator is never resolved toward convergence.
+  comes back clean, or with only mediums and lows, is a loop that CONVERGED, and
+  convergence is a stop. Describing finished work as halted by a rule reports a wall that
+  was never hit. The severity call at that last cycle belongs to the reviewer rather than
+  the builder, and an ambiguity at the terminator is never resolved toward convergence.
+- The mediums and lows left at convergence are a REPORT, not a queue. They are not work
+  that has yet to be done; they are what the loop decided not to do. Acting on them is new
+  scope, and new scope is the requester's to authorise, in one line, with a recommendation
+  attached whose default is to fix none of them.
+- A severity word travels with its trigger condition or it is an inflated claim. "Can
+  report success while the state is wrong" is true of most checks and tells the requester
+  nothing; the same finding qualified with what must coincide for it to happen, and how
+  briefly, is one they can price in seconds. A reviewer grades the artifact in isolation
+  and cannot know the deployment reality that makes a finding rare, so its label is an
+  input to that judgment rather than a verdict to pass along. Relaying an unweighted
+  severity is how a narrow race arrives sounding like a fire, and consent obtained that
+  way was manufactured rather than given.
+- When the findings start landing only in machinery added after convergence, rather than
+  in the work that was asked for, the loop is eating itself: stop and hand it back. That
+  boundary is visible while it is happening.
 - Cycle counts are stated as they happen, in the message where each one lands. A count
   reassembled afterwards is the count that gets talked down.
 - Before a reading is believed, the instrument that produced it is checked: an empty
