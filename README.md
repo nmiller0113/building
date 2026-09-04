@@ -30,10 +30,37 @@ finished that is not "it runs".
 **`crosscheck`** is the review discipline it hands off to, and it is bounded at both
 ends. **How wide:** a review looks at what changed and nothing else, asking two questions
 only. Ask it what else is wrong and it will tell you, forever, because an uncovered
-codebase plus a reviewer told to hunt is an unbounded list. **How many times:** the
-builder gets three cycles, then the roles swap and the reviewer builds, then it stops at
-six and comes back to you. Six failed cycles means the problem is misunderstood rather
-than unfinished, and that is a conversation.
+codebase plus a reviewer told to hunt is an unbounded list. **How many times:** six cycles,
+then it stops and comes back to you, because six failed cycles means the problem is
+misunderstood rather than unfinished, and that is a conversation.
+
+### Who reviews, and who builds
+
+**You name one always-reviewer, once.** Put it in your own instruction file. That model
+reviews every cycle, one through six, no matter who built. It is a designation and not a
+rank: it does not have to be the most capable model you have, and naming a mid-tier one is
+a valid choice rather than a compromise.
+
+**Nothing named yet? It asks you, before the first review.** That is where every fresh
+install starts, so expect the question once. It will not pick a reviewer for you and it
+will not skip the review because nobody has been named. If you have no second model to
+name, fresh agents sharing none of the build conversation, or a person, is a valid answer.
+
+**Independence is the fresh context, not a different engine.** What a review buys you is a
+reader who did not write the thing. So where your reviewer and your builder are the same
+model, that is two separate fresh contexts, one building and one reviewing, and it is not
+a weaker review.
+
+**The builder is whatever model you triggered the build from.** Nothing to choose at cycle
+one. After three failed cycles the BUILDER steps up exactly one tier and builds four to six
+from the reviewer's findings, while your designated reviewer keeps reviewing. The reviewer
+never moves: three failures are evidence about the builder, not about the review. Where
+there is no tier above your builder, it says so and keeps building to six on the same model
+rather than inventing a tier or stopping short.
+
+**If your reviewer is unavailable, it stops and asks you.** Out of quota, erroring,
+unreachable: it will not quietly review with something else, and it will not carry on
+unreviewed.
 
 They ship together because they are one practice. Use `building` and it will reach for
 `crosscheck` at step three.

@@ -18,18 +18,40 @@ and a review loop that never terminates, because every fix is itself new work to
    of it, and not the field names its consumer happens to use.
 2. **Implement.**
 3. **Send it for adversarial review. Unprompted. Every time.** Three strikes, then the
-   roles swap, three more, then stop at six and bring it to the requester.
+   builder tiers up, three more, then stop at six and bring it to the requester. The
+   reviewer never changes.
 
 There is no fourth step, and no step is a test file. Write tests when the work needs them
 or the requester asks. This is not a testing policy.
 
 ## Who reviews
 
-The reviewer is **the most independent capable context available to you**: a different
-model if you have one, otherwise fresh subagents sharing none of the build conversation,
-otherwise a person. Independence from the build context is the property that matters.
-The engine is not. Name your builder and your reviewer once in your own instruction file
-so it is not decided per task.
+The reviewer is **whichever model the requester has designated as their always-reviewer**.
+The requester names it once in their own instruction file, never per task, and it reviews
+**every cycle, one through six, whoever built**.
+
+**That designation is not a rank.** It need not be the most capable model available, and
+naming a mid-tier one is a valid choice rather than a compromise. The rule is the
+designation, not "whoever is strongest today".
+
+**Independence is the fresh context, not a different engine.** What review buys is a reader
+who did not write the thing, so the reviewer shares none of the build conversation. Where
+the designated reviewer and the builder are the same model, that is two separate fresh
+contexts, one building and one reviewing, and the review is not thereby weaker.
+
+**Designated reviewer unavailable? Stop and ask.** Out of quota, erroring, unreachable: that
+is a stop, not a licence to substitute. Say which reviewer is unavailable and wait for the
+requester. Do not review with a different model because independence would technically
+survive it, and do not proceed unreviewed. The sentence above is about which CONTEXT the
+reviewer runs in, never about swapping the model out.
+
+**No designation yet? Ask for one before the first review, and do not start without it.**
+That is where every fresh install begins, so it is the common case, not the edge. Do not
+pick a reviewer yourself, do not fall back to "whoever seems most capable", and do not skip
+the review because nobody was named. Ask once; the requester records the answer in their
+own instruction file, which is what stops it being asked again. Do not write it there
+yourself. Fresh agents sharing none of the build conversation, or a person, is a valid
+answer where they have no second model to name.
 
 ## Everything gets reviewed. All means all.
 
@@ -84,15 +106,25 @@ not the whole file.
 
 | Cycle | Builds and fixes | Reviews |
 |:--|:--|:--|
-| 1 to 3 | builder | reviewer |
-| 4 to 6 | reviewer | reviewer |
+| 1 to 3 | builder | the designated reviewer |
+| 4 to 6 | the next tier up, from the reviewer's findings | the designated reviewer |
 | 7 | does not exist | STOP. Bring it to the requester. |
 
 A **cycle** is one build-or-fix attempt plus one review of it. Without a terminator,
 "everything gets reviewed" plus "a fix is new development" is an infinite loop. Three
-strikes was never a stopper; it only changes who does the work. In cycles 4 to 6 the
-reviewer reviews its own build, which costs the independence that makes review valuable.
-That is a deliberate trade, and the three-cycle cap on that phase is what bounds it.
+strikes was never a stopper; it only changes **who builds**.
+
+**The reviewer does not move.** Three failures are evidence the BUILDER is the wrong
+instrument, not that the review is, so the builder steps up and the designated reviewer
+keeps reviewing. That is what preserves independence through the second phase rather than
+spending it exactly when the work is going badly.
+
+**The builder is whatever model the build was triggered from**, so there is nothing to
+choose at cycle 1. At cycle 4 it steps up exactly one tier. Where there is no tier above
+it, say so and **keep building to six on the same model** rather than inventing a tier or
+stopping early: the loop is bounded at six either way, and three cycles are not a budget to
+forfeit because the ladder ran out. Cycle 7 is the same conversation it always was, and
+there is no third tier by default.
 
 **The count is per DISTINCT CHANGE, not per body of work.** A new change starts at cycle
 1 even when it lands minutes after another exhausted its three. That is the generous

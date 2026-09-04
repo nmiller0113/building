@@ -8,10 +8,13 @@ text is not loaded, the statements below are the rule in effect.
   locate by version is unshipped.
 - The review is run by a context independent of the one that built, and it looks at what
   changed and nothing else: does this change do what it claims, and did it break what
-  already worked. The builder holds the first three cycles; after three failures the
-  roles swap and the reviewer builds; after three more the work stops and goes back to
-  the requester. A failure is a confirmed critical or high finding, and mediums and lows
-  are a sentence to the requester rather than another cycle.
+  already worked. The reviewer is the one the requester designated once in their own
+  instruction file, and it reviews every cycle whoever built; independence is the fresh
+  context rather than a different engine. The builder holds the first three cycles; after
+  three failures the builder tiers up one step and that next tier builds from the
+  reviewer's findings; after three more the work stops and goes back to the requester.
+  A failure is a confirmed critical or high finding, and mediums and lows are a sentence
+  to the requester rather than another cycle.
 - A version number is a claim and a tag is the evidence for it. Anything that declares a
   version carries exactly one source of truth for that number, an annotated tag on the
   commit that declares it, and a release carrying the same text as the changelog entry.

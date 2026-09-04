@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.3.0
+
+The review loop spent its independence at exactly the moment it mattered most, and this
+version turns that around.
+
+It read: the builder holds cycles one to three, and after three failures the roles swap and
+the reviewer builds four to six. The skill said out loud what that costs, that the reviewer
+then reviews its own build, and called it a deliberate trade bounded by the three-cycle cap.
+It is not a trade worth making. Three failures are evidence about the BUILDER, not about the
+review, so the thing that should move is the builder.
+
+The reviewer no longer moves. You designate one always-reviewer once, in your own instruction
+file, and it reviews every cycle, one through six, whoever built. After three failures the
+BUILDER steps up one tier and builds from the reviewer's findings. Cycle seven still does not
+exist, and there is no third tier by default.
+
+**If you are updating and your instruction file names a builder, that name no longer does
+anything.** The previous version told you to name both. There is now nothing to choose: the
+builder is whatever model the build was triggered from. Only the reviewer is designated.
+
+**And it will ask you for that reviewer before its first review.** That is every fresh
+install, and it is also any existing user who never named one, because the previous version
+had an automatic fallback chain and this one does not. It will not
+pick one for you, will not fall back to whichever model looks most capable, and will not skip
+the review because nobody was named. Answer once and record it in your instruction file. If
+you have no second model to name, fresh agents sharing none of the build conversation, or a
+person, is a valid answer.
+
+Two more rules the loop now carries where it used to be silent. **Where there is no tier
+above your builder** (you triggered the build from your top model), it says so and keeps
+building to six on the same one, rather than inventing a tier or quietly turning six cycles
+into three. **Where your designated reviewer is unavailable**, whether out of quota,
+erroring or unreachable, it stops and asks you. It will not substitute a different model on
+the grounds that independence would technically survive it, and it will not carry on
+unreviewed.
+
+Two things travel with the designation. It is not a rank: it does not have to be the most
+capable model available, and naming a mid-tier one is a valid choice rather than a
+compromise. And independence is the fresh context rather than a different engine, which is
+what makes the rule hold together at all: where the designated reviewer and the builder are
+the same model, that is two separate fresh contexts, one building and one reviewing, and the
+review is not thereby weaker. What review buys is a reader who did not write the thing.
+
+The correction reaches every place that taught the old shape, in both skills, both shipped
+REMINDER files and README.md, since a reminder is printed into a live context and a stale
+sentence there outranks a correct one in a skill body that may never load. README.md gains a
+"Who reviews, and who builds" section stating the whole rule in one place.
+
 ## 2.2.0
 
 The crosscheck skill told you to do the wrong thing at the end of a review loop, and this

@@ -30,9 +30,13 @@ The full discipline is the **crosscheck** skill, which ships beside this one. Th
 so that it is never in doubt at the moment it matters:
 
 - **The builder builds. A different, independent context reviews.** Not the same
-  conversation grading its own work.
+  conversation grading its own work. The reviewer is the one the requester designated
+  once, and it reviews every cycle. Independence is the fresh context, not a different
+  engine.
 - **Three strikes.** If three build-and-review cycles have not produced something that
-  passes, the roles swap: the reviewer builds from its own findings.
+  passes, the **builder tiers up one step** and builds from the reviewer's findings. The
+  reviewer does not change: three failures say the builder is the wrong instrument, not
+  the review.
 - **Three more, then stop and bring it to the requester.** Six failed cycles is evidence
   the problem is misunderstood rather than unfinished, and that is a conversation, not
   more attempts.
@@ -42,8 +46,10 @@ so that it is never in doubt at the moment it matters:
 - **A failure is a confirmed critical or high finding.** Mediums and lows are a sentence
   to the requester, not another cycle.
 
-Name your builder and your reviewer once in your own instruction file, so it is not
-decided per task. Everything else about how the loop terminates, what counts as a
+The requester names their always-reviewer once in their own instruction file, so it is not
+decided per task, and where none is named yet the answer is asked for rather than chosen.
+There is no builder to name: the builder is whatever model the build was triggered from.
+Everything else about how the loop terminates, what counts as a
 distinct change, and why a finding about your own check is a report rather than a
 failure, is in crosscheck.
 

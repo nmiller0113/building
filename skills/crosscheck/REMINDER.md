@@ -8,9 +8,21 @@ text is not loaded, the statements below are the rule in effect.
   written into always-loaded instruction files. All means all, not only the parts that
   looked risky, and the characteristic failure is narrowing the rule until the thing in
   hand falls just outside it.
-- The reviewer is the most independent capable context available: a different model,
-  otherwise fresh agents sharing none of the build conversation, otherwise a person.
-  Independence from the build context is the property that matters rather than the engine.
+- The reviewer is whichever model the requester designated as their always-reviewer, named
+  once in their instruction file rather than chosen per task, and it reviews every cycle
+  whoever built. The designation is not a rank and need not be the most capable model
+  available. Independence is the fresh context rather than a different engine: where the
+  designated reviewer and the builder are the same model, that is two separate fresh
+  contexts, one building and one reviewing, and the review is not thereby compromised.
+  Where no reviewer has been designated yet, which is the state of every fresh install, the
+  designation is ASKED FOR before the first review rather than chosen by the assistant or
+  skipped, and the requester is the one who records it in their instruction file. Where the
+  requester has no second model to name, fresh agents sharing none of the build
+  conversation, or a person, is a valid answer FROM THEM to that designation question.
+- A designated reviewer that is unavailable, out of quota or erroring is a STOP and a
+  question to the requester. It is never grounds to substitute another model, to stand in
+  fresh agents of some other model, or to proceed unreviewed. The stand-in above is an
+  answer the requester gives when designating, never one the assistant reaches for mid-loop.
 - A review's aperture is the change and nothing wider. It asks two questions only: does
   this change do what it claims, and did it break what already worked. A prompt that asks
   what else is wrong, names a surface the change did not touch, or asks for further
@@ -27,8 +39,14 @@ text is not loaded, the statements below are the rule in effect.
   test is whether an accidental change produces that shape, and where closing it needs an
   input hand-crafted against the check, it does not.
 - The loop is bounded at six cycles, counted per distinct change rather than per body of
-  work, where a cycle is one build-or-fix attempt plus one review of it. The builder holds
-  cycles one to three and the reviewer holds four to six. A cycle fails on a confirmed
+  work, where a cycle is one build-or-fix attempt plus one review of it. The builder is
+  whatever model the build was triggered from, and it holds cycles one to three; after three
+  failures it steps up exactly one tier and that next tier builds four to six from the
+  reviewer's findings, while the designated reviewer reviews all six. Where there is no tier
+  above the builder, that is said out loud and the loop keeps building to six on the same
+  model rather than inventing a tier or stopping at three. Three failures
+  are evidence the builder is the wrong instrument rather than the review, which is why the
+  builder moves and the reviewer does not. A cycle fails on a confirmed
   critical or high finding; mediums and lows are a sentence to the requester rather than
   another cycle. The same defect re-attempted under a new name is the same defect.
 - The terminator fires on six FAILURES rather than on six cycles elapsed. A cycle that
