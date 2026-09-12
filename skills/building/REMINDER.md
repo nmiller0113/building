@@ -14,7 +14,13 @@ text is not loaded, the statements below are the rule in effect.
   three failures the builder tiers up one step and that next tier builds from the
   reviewer's findings; after three more the work stops and goes back to the requester.
   A failure is a confirmed critical or high finding, and mediums and lows are a sentence
-  to the requester rather than another cycle.
+  to the requester rather than another cycle. A constraint on APPLYING the result, such as a
+  maintenance window or a live host, is a reason to wait before applying and never a reason to
+  stop reviewing, since the review reaches nothing and changes nothing: a build that has been
+  made but not reviewed is the middle of a cycle rather than a place to stop, and the reviewed
+  artifact and the constraint go to the requester together as one decision. This does not touch
+  the stops that are real. An unavailable reviewer, no reviewer designated yet, and scope that
+  grows mid-build each stop the loop on their own terms.
 - A version number is a claim and a tag is the evidence for it. Anything that declares a
   version carries exactly one source of truth for that number, an annotated tag on the
   commit that declares it, and a release carrying the same text as the changelog entry.

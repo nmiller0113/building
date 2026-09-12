@@ -40,6 +40,13 @@ so that it is never in doubt at the moment it matters:
 - **Three more, then stop and bring it to the requester.** Six failed cycles is evidence
   the problem is misunderstood rather than unfinished, and that is a conversation, not
   more attempts.
+- **A constraint on applying the result is not an exit.** A maintenance window, a live host,
+  a deploy freeze: each is a reason to wait before applying a change, and none is a reason to
+  stop reviewing one, because the review reaches nothing and changes nothing. A build that has
+  been made but not reviewed is the middle of a cycle rather than the end of one. Finish the
+  cycles, then hand the reviewed artifact and the constraint over together, as one decision.
+  This does not touch the stops that are real. An unavailable reviewer, no reviewer designated
+  yet, and scope that grows mid-build each stop the loop on their own terms.
 - **The review looks at what changed and nothing else.** Two questions only: does this
   change do what it claims, and did it break what already worked. A prompt that asks what
   else is wrong commissions findings instead of checking work, and that list has no end.

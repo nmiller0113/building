@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.4.0
+
+A build that has been made but not reviewed is the middle of a cycle, and this version says so
+in both skills and in both shipped REMINDER files.
+
+The skill already said that a failure is a confirmed critical or high finding, and already said
+where the loop ends. What none of the four said is that a constraint on APPLYING a change has
+no bearing on REVIEWING it. A maintenance window, a live host, a deploy freeze: each is a
+reason to wait before applying, and none is a reason to leave a build sitting unreviewed,
+because the review reaches nothing and changes nothing. Finish the cycles, then hand the
+reviewed artifact and the constraint over together, as one decision for the requester.
+
+The stops that are real are untouched, and they are now named alongside the new rule in each
+place it appears, so that the two are not confused: a reviewer who is unavailable, a reviewer
+who has not been designated yet, and scope that grows mid-build.
+
+Landed in `building` and in `crosscheck`, in the skill body and in the shipped REMINDER of
+each, so it reaches a session whether or not either skill is ever invoked.
+
 ## 2.3.0
 
 The review loop spent its independence at exactly the moment it mattered most, and this

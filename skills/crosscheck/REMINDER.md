@@ -23,6 +23,13 @@ text is not loaded, the statements below are the rule in effect.
   question to the requester. It is never grounds to substitute another model, to stand in
   fresh agents of some other model, or to proceed unreviewed. The stand-in above is an
   answer the requester gives when designating, never one the assistant reaches for mid-loop.
+- A constraint on APPLYING the result is not an ending. A maintenance window, a live host or a
+  deploy freeze is a reason to wait before applying a change and never a reason to stop
+  reviewing one, since the review reaches nothing and changes nothing: a build that has been
+  made but not reviewed is the middle of a cycle. The reviewed artifact and the constraint go to
+  the requester together, as one decision. This does not touch the stops that are real: the
+  unavailable reviewer and the missing designation above, and scope that grows mid-build, each
+  stop the loop on their own terms.
 - A review's aperture is the change and nothing wider. It asks two questions only: does
   this change do what it claims, and did it break what already worked. A prompt that asks
   what else is wrong, names a surface the change did not touch, or asks for further

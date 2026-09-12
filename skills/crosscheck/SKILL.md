@@ -159,6 +159,14 @@ rare in deployment; an unweighted label is how a narrow race arrives sounding li
 and a yes obtained that way is manufactured. Findings landing only in machinery added AFTER
 convergence mean the loop is eating itself, the last honest place to stop.
 
+**A constraint on APPLYING the result is not an ending.** A maintenance window, a live host, a
+deploy freeze: each is a reason to wait before applying a change, and none is a reason to stop
+reviewing one, since the review reaches nothing and changes nothing. A build that has been made
+but not reviewed is the middle of a cycle. The reviewed artifact and the constraint go to the
+requester together, as one decision. This does not touch the stops that are real. An
+unavailable reviewer, no reviewer designated yet, and scope that grows mid-build each stop the
+loop on their own terms.
+
 **The severity call at cycle 6 is the reviewer's, not the builder's.** A confirmed
 critical or high you cannot refute on live evidence is a failure, and one you are unsure
 about goes to the requester. An ambiguity at the terminator is never resolved toward
