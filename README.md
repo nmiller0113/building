@@ -106,6 +106,12 @@ Armed, it enforces two things:
   **you actually typed** this session. It reads the live transcript to check, which is the
   point: Claude cannot write its own permission slip.
 - **A commit is blocked** while that work order says a review is owed and records none.
+- **A live change is blocked** on the same condition: a command that changes a running
+  system, such as a service manager start or enable, a deploy tool (`kubectl apply`,
+  `terraform apply`, `docker compose up`, `ansible-playbook`), a copy to another machine,
+  or a mutating HTTP request (`curl -X POST`, `-d`, `-F`). A review run after the change is
+  already live is an audit, not a gate. Reading a running system (`curl` GETs,
+  `systemctl status`, `kubectl get`) is never held.
 
 ```json
 { "quote": "your literal words asking for this",
@@ -137,6 +143,12 @@ The bounded part is the shell. An interpreter's **inline** script is scanned for
 calls as a best effort, and a script already on disk is never read at all, so
 `python3 build.py` passes. An inline body written deliberately to slip past that scan will
 slip past it. The gate exists to stop unasked-for work, not to contain an adversary.
+
+The live-change check is the opposite shape on purpose: a list of known changers, because
+a list of commands that leave every remote system untouched cannot be written. A changer
+it does not know goes through, which is how every live change behaved before this check
+existed. Remote commands over `ssh` are not inspected, and a script on disk that makes
+its own HTTP calls is not read.
 
 It fails **open**: any error lets the call through, logged and surfaced to you, so a
 permanently broken gate cannot quietly masquerade as a working one.

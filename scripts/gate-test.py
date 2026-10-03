@@ -378,6 +378,99 @@ for desc, (tool, ti), st, want in AUTH:
     blocked, out = run(tool, ti, st)
     check("AUTH: " + desc, blocked, want, out)
 
+# ---- LIVE: commands that change a running system are held while a review is owed. ----
+# Each LIVE_CHANGE must BLOCK under NEEDS_REVIEW and ALLOW once the review is recorded.
+LIVE_CHANGE = [
+    "curl -s -X POST -H 'Authorization: Bearer t' https://fleet.example/api/v1/scripts/run -d '{}'",
+    "curl -XPATCH https://api.example/x",
+    "curl --request=DELETE https://api.example/x",
+    "curl -F 'script=@a.sh' https://fleet.example/api/v1/scripts",
+    "curl -d @body.json https://api.example/x",
+    "curl --json '{}' https://api.example/x",
+    "curl -T file.bin https://up.example/",
+    "wget --post-data=a=1 https://api.example/x",
+    "http POST https://api.example/x a=1",
+    "systemctl --user enable --now foo.timer",
+    "systemctl --user link /srv/foo.service",
+    "sudo systemctl restart nginx",
+    "systemctl -H host1 restart nginx",
+    "systemctl --user daemon-reload",
+    "launchctl bootstrap system /Library/LaunchDaemons/x.plist",
+    "launchctl kickstart -k system/x",
+    "service nginx reload",
+    "kubectl apply -f deploy.yaml",
+    "kubectl -n prod rollout restart deploy/web",
+    "docker service update --image web:2 web",
+    "docker stack deploy -c stack.yml web",
+    "vercel",
+    "vercel deploy --prod",
+    "helm upgrade web ./chart",
+    "terraform apply -auto-approve",
+    "docker compose up -d",
+    "docker-compose restart web",
+    "docker run -d nginx",
+    "ansible-playbook site.yml",
+    "scp build.tar host1:/srv/",
+    "rsync -a dist/ web1:/var/www/",
+    "for h in 1 2; do curl -s -X POST https://x/run -d $h; done",
+    "bash -lc 'curl -X POST https://x/y'",
+    "python3 - <<'E'\nimport urllib.request\nurllib.request.urlopen(urllib.request.Request(u,\n  headers=H, data=b'{}'))\nE",
+    "python3 -c \"import requests; requests.post('https://x', json={})\"",
+    "python3 - <<'E'\nimport subprocess\nsubprocess.run(['systemctl', 'restart', 'x'])\nE",
+]
+# Reading a running system is never extra. These must ALLOW even while a review is owed.
+LIVE_READ = [
+    "curl -s https://fleet.example/api/v1/hosts",
+    "curl -s -H 'Authorization: Bearer t' https://api.example/x | jq .",
+    "curl -G -d q=1 https://api.example/search",
+    "curl -X GET https://api.example/x",
+    "wget -qO- https://example.com/",
+    "http GET https://api.example/x",
+    "systemctl --user status foo.service",
+    "systemctl --user list-timers --all",
+    "systemctl --user show foo.service -p Result",
+    "launchctl print system/x",
+    "kubectl get pods -n prod",
+    "kubectl describe deploy web",
+    "helm list",
+    "terraform plan",
+    "docker ps",
+    "docker compose ps",
+    "ansible-playbook site.yml --check",
+    "scp host1:/var/log/x.log /tmp/x.log",
+    "rsync -a web1:/var/www/ backup/",
+    "python3 - <<'E'\nimport urllib.request\nprint(urllib.request.urlopen(u).read())\nE",
+    "echo 'curl -X POST https://x'",
+    "grep -n 'systemctl restart' README.md",
+    # review findings, 2.5.0 cycle 1: read-shaped sub-commands of listed changers
+    "kubectl rollout status deploy/web",
+    "kubectl rollout history deploy/web",
+    "docker service ls",
+    "docker stack ps web",
+    "vercel ls",
+    "vercel logs https://x.vercel.app",
+    "rsync -an dist/ web1:/var/www/",
+    "rsync -a --dry-run dist/ web1:/var/www/",
+    "helm upgrade web ./chart --dry-run",
+    "kubectl create deploy x --image=y --dry-run=client -o yaml",
+    "docker compose pull",
+]
+REVIEWED = dict(NEEDS_REVIEW, review_done="agent-1 clean")
+for c in LIVE_CHANGE:
+    blocked, out = run(*bash(c), NEEDS_REVIEW)
+    check("LIVE blocks while review owed: " + c.replace("\n", "\\n")[:60], blocked, True, out)
+    if blocked and "live change blocked" not in out:
+        fails.append("LIVE: block message does not say 'live change': " + c[:60])
+    blocked, out = run(*bash(c), REVIEWED)
+    check("LIVE allowed once reviewed: " + c.replace("\n", "\\n")[:60], blocked, False, out)
+    blocked, out = run(*bash(c), GOOD)
+    check("LIVE allowed when review not required: " + c.replace("\n", "\\n")[:50], blocked, False, out)
+for c in LIVE_READ:
+    blocked, out = run(*bash(c), NEEDS_REVIEW)
+    check("LIVE read allowed while review owed: " + c.replace("\n", "\\n")[:55], blocked, False, out)
+blocked, out = run(*bash("curl -X POST https://x/y"), STALE_REVIEW)
+check("LIVE: STALE order still blocks a live change", blocked, True, out)
+
 # ---- CARRIED-OVER ORDERS ------------------------------------------------------------
 # The nightly restart carries a live work order into a session that cannot verify its
 # quote, because the session it was verifiable in is gone. That is not the fabrication
@@ -585,7 +678,8 @@ check("ENV: unreadable transcript allows", blocked, False, out)
 if "NOT verified" not in out:
     fails.append("ENV: unreadable transcript did not warn that the quote was unverified")
 
-total = len(LEGIT) + len(WRITES) + len(AUTH) + len(CARRY) + 21
+total = (len(LEGIT) + len(WRITES) + len(AUTH) + len(CARRY) + 21
+         + 3 * len(LIVE_CHANGE) + len(LIVE_READ) + 1)
 print()
 for f in fails:
     print("FAIL " + f)

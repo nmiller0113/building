@@ -10,8 +10,9 @@ WHAT IT ENFORCES
   1. SCOPE. Before the first file change, a WORK ORDER must exist naming, in the USER'S
      OWN WORDS, what was asked. The quote is verified against the real session
      transcript on disk, so the assistant cannot author its own authorisation.
-  2. REVIEW. A work order declares whether a review is owed. A commit is blocked
-     while one is owed and unrecorded.
+  2. REVIEW. A work order declares whether a review is owed. A commit, and any command
+     that changes a running system (service manager, deploy tool, mutating HTTP
+     request), is blocked while one is owed and unrecorded.
 
 FAIL-OPEN, DELIBERATELY. A gate that wedges a session is worse than the gap it closes.
   Any unexpected error lets the call through and is logged. It blocks only when certain.
@@ -872,6 +873,185 @@ def interpreter_writes(cmd, depth=0):
     return any(interpreter_writes(s, depth + 1) for s in substs)
 
 
+# ⭐ LIVE CHANGES. A review that runs after the change is already on a real machine is not a
+# gate, it is an audit. Blocking only the commit left exactly that hole open: a script could
+# be pushed to a fleet, a service enabled, a manifest applied, and the review would happen
+# against something already live. So while a required review is unrecorded, the commands
+# that change a running system are held the same way a commit is.
+#
+# This is a list of KNOWN changers, the shape the file-write half deliberately abandoned,
+# and it can only ever be incomplete. That is accepted here because the direction of a miss
+# is the old behaviour (the change goes through, as it always did), not a new silent hole,
+# and because an allowlist of "commands that leave every remote system untouched" cannot
+# be written. The block is also narrow in time: it applies only while a review is owed.
+#
+# Verb sets: a head maps to the subcommands that change state. An empty set means every
+# invocation of that head counts (unless an exemption below says otherwise).
+DEPLOY_VERBS = {
+    "systemctl": {"start", "stop", "restart", "reload", "try-restart", "reload-or-restart",
+                  "try-reload-or-restart", "enable", "disable", "reenable", "link", "mask",
+                  "unmask", "preset", "preset-all", "daemon-reload", "edit", "revert",
+                  "isolate", "kill", "set-property", "set-default"},
+    "launchctl": {"load", "unload", "bootstrap", "bootout", "kickstart", "enable",
+                  "disable", "start", "stop", "kill", "submit", "remove"},
+    "service": {"start", "stop", "restart", "reload", "force-reload"},
+    "kubectl": {"apply", "create", "delete", "patch", "replace", "rollout", "scale", "set",
+                "edit", "label", "annotate", "expose", "run", "cordon", "uncordon", "drain",
+                "taint", "autoscale"},
+    "helm": {"install", "upgrade", "uninstall", "delete", "rollback"},
+    "terraform": {"apply", "destroy", "import"},
+    "tofu": {"apply", "destroy", "import"},
+    "pulumi": {"up", "destroy", "import"},
+    "docker": {"run", "start", "stop", "restart", "rm", "kill", "push", "deploy", "stack",
+               "service", "up", "down"},
+    "podman": {"run", "start", "stop", "restart", "rm", "kill", "push"},
+    "flyctl": {"deploy", "scale", "secrets", "machine"},
+    "fly": {"deploy", "scale", "secrets", "machine"},
+    "netlify": {"deploy"},
+    "vercel": {"deploy", "redeploy", "promote", "rollback", "remove", "rm", "alias"},
+    "ansible-playbook": set(),
+}
+# docker compose / docker-compose: the state-changing verb is one level down.
+COMPOSE_VERBS = {"up", "down", "start", "stop", "restart", "rm", "kill", "create", "run",
+                 "push"}
+# Verbs that are only a change with the right sub-verb: `kubectl rollout status` and
+# `docker service ls` look, `kubectl rollout restart` and `docker service update` change.
+SUBVERBS = {
+    ("kubectl", "rollout"): {"restart", "undo", "pause", "resume"},
+    ("docker", "service"): {"create", "update", "rm", "remove", "rollback", "scale"},
+    ("docker", "stack"): {"deploy", "up", "rm", "remove", "down"},
+}
+
+
+def _dry_run(head, words):
+    """A rehearsal changes nothing: --dry-run anywhere, and rsync's -n (alone or clustered)."""
+    if any(w == "--dry-run" or w.startswith("--dry-run=") for w in words[1:]):
+        return True
+    return head == "rsync" and any(re.match(r"^-[A-Za-z]*n[A-Za-z]*$", w) for w in words[1:])
+HTTP_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+# An inline interpreter body making a mutating HTTP call or driving a service manager.
+# Best effort, like BODY_WRITE: it catches the accidental case, not a body built to dodge it.
+BODY_DEPLOY = re.compile(
+    r"(?<![A-Za-z0-9_])requests\.(post|put|patch|delete)\s*\("
+    r"|method\s*[=:]\s*['\"](POST|PUT|PATCH|DELETE)['\"]"
+    r"|(?<![A-Za-z0-9_])(Request|urlopen)\s*\((?:[^()]|\([^()]*\))*?(?<![A-Za-z0-9_])data\s*="
+    r"|['\"](systemctl|launchctl)['\"]\s*,\s*['\"](start|stop|restart|reload|enable|disable|"
+    r"link|daemon-reload|load|unload|bootstrap|bootout|kickstart)['\"]",
+    re.S)
+
+
+def _first_verb(words, start=1):
+    """The first word after `start` that is not an option."""
+    i = start
+    while i < len(words):
+        w = words[i]
+        if w == "--":
+            return words[i + 1] if i + 1 < len(words) else ""
+        if not w.startswith("-"):
+            return w
+        i += 1
+    return ""
+
+
+def _curl_mutates(words):
+    get = any(w in ("-G", "--get") for w in words[1:])
+    for i, w in enumerate(words[1:], 1):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if w in ("-X", "--request") and nxt.upper() in HTTP_MUTATING:
+            return True
+        if (w.startswith("-X") and w[2:].upper() in HTTP_MUTATING) or \
+                (w.startswith("--request=") and w.split("=", 1)[1].upper() in HTTP_MUTATING):
+            return True
+        if w in ("-T", "--upload-file") or w.startswith("--upload-file="):
+            return True
+        if w in ("-F", "--form", "--form-string", "--json") or \
+                w.startswith(("--form=", "--form-string=", "--json=")):
+            return True
+        if not get and (w in ("-d", "--data", "--data-raw", "--data-binary",
+                              "--data-urlencode", "--data-ascii")
+                        or w.startswith(("--data=", "--data-raw=", "--data-binary=",
+                                         "--data-urlencode=", "--data-ascii="))
+                        or (len(w) > 2 and w.startswith("-d") and not w.startswith("--"))):
+            return True
+    return False
+
+
+def _deploy_segment(words):
+    head = os.path.basename(words[0])
+    if _dry_run(head, words):
+        return False
+    if head == "curl":
+        return _curl_mutates(words)
+    if head == "wget":
+        return any(w.startswith(("--post-data", "--post-file", "--body-data", "--body-file"))
+                   or (w.startswith("--method=") and w.split("=", 1)[1].upper() in HTTP_MUTATING)
+                   or (w == "--method" and i + 1 < len(words)
+                       and words[i + 1].upper() in HTTP_MUTATING)
+                   for i, w in enumerate(words))
+    if head in ("http", "https", "xh"):            # HTTPie: `http POST url ...`
+        return _first_verb(words).upper() in HTTP_MUTATING
+    if head == "docker-compose":
+        return _first_verb(words) in COMPOSE_VERBS
+    if head in ("docker", "podman") and _first_verb(words) == "compose":
+        i = words.index("compose")
+        return _first_verb(words, i + 1) in COMPOSE_VERBS
+    if head == "ansible-playbook":
+        return not any(w in ("--check", "-C", "--syntax-check") or w.startswith("--list-")
+                       for w in words[1:])
+    if head in ("scp", "rsync"):
+        # copying TO another machine: a non-option operand shaped host:path, last position
+        ops = [w for w in words[1:] if not w.startswith("-")]
+        return bool(ops) and bool(re.match(r"^[^/:]+:", ops[-1]))
+    if head in DEPLOY_VERBS:
+        verbs = DEPLOY_VERBS[head]
+        # The first two non-option words, not just the first: an option that takes a
+        # value (`kubectl -n prod apply`, `systemctl -H host restart`) leaves its value
+        # where the verb would be.
+        ops = [w for w in words[1:] if not w.startswith("-")]
+        if head == "vercel" and not ops:
+            return True                      # bare `vercel` deploys the current project
+        for i, w in enumerate(ops[:2]):
+            if w in verbs:
+                sub = SUBVERBS.get((head, w))
+                return sub is None or (i + 1 < len(ops) and ops[i + 1] in sub)
+        return not verbs
+    return False
+
+
+def is_live_change(cmd, depth=0):
+    """A command that changes a running system: a service manager, a deploy tool, a
+    mutating HTTP request, or an inline interpreter body doing one of those."""
+    if depth > 3:
+        return False
+    segments, heredocs, substs = tokenize(cmd)
+    for idx, seg in enumerate(segments):
+        words = words_of(seg)
+        if not words:
+            continue
+        head = os.path.basename(words[0])
+        if head in ("xargs", "parallel"):
+            words = _xargs_inner(words)
+            if not words:
+                continue
+            head = os.path.basename(words[0])
+        if head in SHELLS:
+            for i, w in enumerate(words):
+                if i and re.match(r"^-[A-Za-z]*c[A-Za-z]*$", w) and i + 1 < len(words) and \
+                        is_live_change(words[i + 1], depth + 1):
+                    return True
+            continue
+        if any(head == x or head.startswith(x) for x in INTERPRETERS):
+            bodies = [b for bi, b in heredocs if bi == idx]
+            bodies += [words[i + 1] for i, w in enumerate(words)
+                       if i and w in ("-c", "-e", "--eval") and i + 1 < len(words)]
+            if any(BODY_DEPLOY.search(b) for b in bodies):
+                return True
+            continue
+        if _deploy_segment(words):
+            return True
+    return any(is_live_change(s, depth + 1) for s in substs)
+
+
 def is_commit(cmd):
     """A real commit, not a command that merely mentions the word."""
     for seg in tokenize(cmd)[0]:
@@ -1370,7 +1550,9 @@ def main():
                 audit = why + ("; quoted: " + ", ".join(quoted[:3]) if quoted else "")
             require_order("file change via Bash\n\n  " + why, audit)
 
-        if not is_commit(cmd):
+        commit = is_commit(cmd)
+        live = not commit and is_live_change(cmd)
+        if not commit and not live:
             return
         # Gated on the order REGARDLESS of age: letting a stale order cancel a recorded
         # review debt turns the strongest state into no enforcement, exactly in the long
@@ -1379,14 +1561,19 @@ def main():
         if not o:
             return
         if o.get("review") == "required" and not str(o.get("review_done", "")).strip():
-            block("REVIEW OWED - commit blocked.\n\n"
+            what = "commit" if commit else "live change"
+            block("REVIEW OWED - " + what + " blocked.\n\n"
                   'This work order says review: "required" and records no review.\n'
                   "  scope: " + str(o.get("scope", "?")) + "\n\n"
-                  "All new development gets reviewed, not just the code that looked risky.\n"
+                  + ("" if commit else
+                     "This command changes a running system (a service, a deploy, or a\n"
+                     "mutating HTTP request). The review comes BEFORE anything goes live,\n"
+                     "not after: a review of something already deployed is an audit.\n\n")
+                  + "All new development gets reviewed, not just the code that looked risky.\n"
                   "Run the review (aperture = this diff, two questions), then set\n"
                   '  "review_done": "<agent id / one-line verdict>"\n'
                   "in " + state + " and try again.",
-                  logpath, tool, "review owed", str(o.get("scope", "?")))
+                  logpath, tool, "review owed (" + what + ")", str(o.get("scope", "?")))
 
 
 try:

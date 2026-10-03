@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.5.0
+
+The review gate now holds a live change, not just a commit.
+
+A required review was enforced only at `git commit`. That left the order of work open
+exactly where it matters most: a build could be pushed to a fleet of machines, a service
+enabled, or a manifest applied, and the review would then run against something already
+live. Reported from the field, where a backup rollout reached a family laptop before its
+review ran. The review passed, which was luck rather than the gate working.
+
+While a work order says a review is owed and records none, the gate now also blocks
+commands that change a running system: service managers (`systemctl`, `launchctl`,
+`service` state changes), deploy tools (`kubectl`, `helm`, `terraform`/`tofu`, `pulumi`,
+`docker`/`podman` and compose, `ansible-playbook` without `--check`, `fly`, `netlify`,
+`vercel`), copies to another machine (`scp`/`rsync` to `host:path`), mutating HTTP requests
+(`curl` with a mutating method or a body, `wget --post-*`, HTTPie), and inline interpreter
+bodies that make a mutating HTTP call or drive a service manager. Reads of a running system
+are never held, including the read-shaped sub-commands of those tools (`kubectl rollout
+status`, `docker service ls`, `vercel ls`), and a `--dry-run` (or rsync's `-n`) is a
+rehearsal, not a change.
+
+This half is a list of known changers, unlike the file-write half, and the README says why
+and what it does not see (`ssh` remote commands, scripts on disk). 37 of the 378 battery
+cases fail when the check is disabled.
+
 ## 2.4.0
 
 A build that has been made but not reviewed is the middle of a cycle, and this version says so
